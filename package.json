@@ -1,0 +1,38 @@
+{
+  "name": "bobo-squad-strike",
+  "version": "3.0.0",
+  "description": "啵啵小队出击：基于 Vue 3 与 Phaser 3 的多页面动作小游戏",
+  "private": true,
+  "author": "GOPtZ",
+  "scripts": {
+    "sync-version": "node ./scripts/sync-version.js",
+    "serve": "set NODE_OPTIONS=--openssl-legacy-provider&& node ./node_modules/@vue/cli-service/bin/vue-cli-service.js serve",
+    "build": "npm run sync-version && set NODE_OPTIONS=--openssl-legacy-provider&& node ./node_modules/@vue/cli-service/bin/vue-cli-service.js build --mode production",
+    "preview": "node server.js",
+    "start": "node server.js",
+    "deploy:cloudflare": "npm run build && wrangler pages deploy dist --project-name bobo-river-clash"
+  },
+  "dependencies": {
+    "core-js": "^3.17.3",
+    "phaser": "^3.55.2",
+    "vue": "^3.2.12",
+    "vue-router": "^4.5.1",
+    "axios": "^0.24.0",
+    "express": "^4.17.1",
+    "@vue/cli-plugin-babel": "~4.5.0",
+    "@vue/cli-service": "~4.5.0",
+    "@vue/compiler-sfc": "^3.2.12",
+    "sass": "^1.41.1",
+    "sass-loader": "^8.0.2",
+    "cors": "^2.8.5"
+  },
+  "devDependencies": {},
+  "keywords": [
+    "vue",
+    "phaser",
+    "game",
+    "cloudflare-pages",
+    "frontend",
+    "browser-game"
+  ]
+}

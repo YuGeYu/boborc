@@ -1,0 +1,26 @@
+/index.html
+  Cache-Control: no-cache, no-store, must-revalidate
+
+/battle.html
+  Cache-Control: no-cache, no-store, must-revalidate
+
+/equipment.html
+  Cache-Control: no-cache, no-store, must-revalidate
+
+/levels.html
+  Cache-Control: no-cache, no-store, must-revalidate
+
+/profile.html
+  Cache-Control: no-cache, no-store, must-revalidate
+
+/saves.html
+  Cache-Control: no-cache, no-store, must-revalidate
+
+/settings.html
+  Cache-Control: no-cache, no-store, must-revalidate
+
+/shop.html
+  Cache-Control: no-cache, no-store, must-revalidate
+
+/world.html
+  Cache-Control: no-cache, no-store, must-revalidate

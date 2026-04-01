@@ -1,0 +1,9 @@
+name = "bobo-river-clash"
+compatibility_date = "2026-03-14"
+pages_build_output_dir = "dist"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "fightback-cloud"
+database_id = "59bb94c5-21a7-41f7-95f5-f29a3f9f301d"
+migrations_dir = "migrations"

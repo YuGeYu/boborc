@@ -1,6 +1,13 @@
 # 啵啵小队出击
 
-一个基于 Vue 3 和 Phaser 3 的多页面动作小游戏项目，包含角色成长、关卡挑战、装备系统、本地存档，以及基于 Cloudflare Pages Functions + D1 的云存档接口。
+《啵啵小队出击》是一个基于 Vue 3 和 Phaser 3 的多页面动作小游戏项目。项目围绕“轻量横版战斗 + 角色成长 + 世界与营地展示”展开，当前已经具备角色招募、关卡挑战、装备搭配、本地存档、云存档，以及营地 AI 问答等功能模块。
+
+这个仓库同时包含：
+
+- 前端页面与 Phaser 战斗逻辑
+- Cloudflare Pages Functions 接口
+- D1 数据库迁移脚本
+- 本地预览、GitHub 推送、Cloudflare 部署所需的脚本和文档
 
 ## 项目特点
 
@@ -100,6 +107,34 @@ npm run deploy:cloudflare
 - 已安装并登录 `wrangler`
 - D1 数据库绑定信息正确
 - 生产环境变量已在 Cloudflare Pages 中配置
+
+当前已验证可以直接部署到 Cloudflare Pages。
+
+## 日常发布流程
+
+提交到 GitHub：
+
+```bash
+publish-github.bat 你的提交说明
+```
+
+或手动执行：
+
+```bash
+git add -A
+git commit -m "你的提交说明"
+git push origin main
+```
+
+部署到 Cloudflare：
+
+```bash
+npm run deploy:cloudflare
+```
+
+或直接双击 `deploy-cloudflare.bat`。
+
+更详细的协作与发布说明见 `发布流程.md`。
 
 ## 维护建议
 

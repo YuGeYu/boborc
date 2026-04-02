@@ -81,6 +81,7 @@
             <p>被动：{{ selectedCharacter.details.passiveDetail }}</p>
             <p>拳击机制：{{ selectedCharacter.details.punchMechanic }}</p>
             <p>飞踢机制：{{ selectedCharacter.details.kickMechanic }}</p>
+            <p v-if="selectedCharacter.details.ultimateMechanic">大招机制：{{ selectedCharacter.details.ultimateMechanic }}</p>
           </div>
           <div class="detail-card">
             <strong>当前状态</strong>

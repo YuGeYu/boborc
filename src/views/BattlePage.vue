@@ -86,6 +86,29 @@
           @game-ready="handleGameReady"
         />
 
+        <div v-if="battleInProgress && liveDebugLog.length" class="record-panel live-record-panel">
+          <div class="panel-header">
+            <h2>实时战斗日志</h2>
+            <span>预览调试用，战斗进行中每隔几秒刷新</span>
+          </div>
+
+          <div class="record-summary">
+            <p>当前日志时间：{{ liveLogUpdatedAt }}</p>
+            <p>当前关卡：第 {{ activeLevel.id }} 关，角色：{{ selectedCharacter.name }}</p>
+          </div>
+
+          <div class="debug-log">
+            <div
+              v-for="(entry, index) in liveDebugLog"
+              :key="`live-${entry.at}-${index}`"
+              class="debug-entry"
+            >
+              <strong>{{ formatDebugTime(entry.at) }} · {{ formatDebugTitle(entry) }}</strong>
+              <span>{{ formatDebugDetail(entry) }}</span>
+            </div>
+          </div>
+        </div>
+
         <div v-if="showRecordPanel" class="record-panel">
           <div class="panel-header">
             <h2>战斗记录</h2>
@@ -106,7 +129,7 @@
               :key="`${entry.at}-${index}`"
               class="debug-entry"
             >
-              <strong>{{ formatDebugTitle(entry) }}</strong>
+              <strong>{{ formatDebugTime(entry.at) }} · {{ formatDebugTitle(entry) }}</strong>
               <span>{{ formatDebugDetail(entry) }}</span>
             </div>
           </div>
@@ -128,7 +151,7 @@
 </template>
 
 <script>
-import { computed, nextTick, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import Game from '@/components/Game'
 import PageLayout from '@/components/PageLayout.vue'
 import { useGameState } from '@/state/useGameState'
@@ -140,6 +163,8 @@ export default {
     const pendingScroll = ref(false)
     const battleInProgress = ref(false)
     const latestBattleResult = ref(null)
+    const liveBattleSnapshot = ref(null)
+    let liveLogTimerId = null
 
     const isFinalBossLevel = computed(() => (
       state.activeLevel.value?.id === 100 &&
@@ -198,6 +223,33 @@ export default {
           .reverse()
       })
 
+    const liveDebugLog = computed(() => {
+      const snapshot = liveBattleSnapshot.value
+      if (!snapshot || !Array.isArray(snapshot.debugLog)) {
+        return []
+      }
+
+      return snapshot.debugLog
+        .filter((entry) => {
+          if (entry.type === 'enemy-reposition') {
+            return false
+          }
+
+          if (entry.type === 'iq45-energy-updated' && entry.detail?.reason === 'time-charge') {
+            return false
+          }
+
+          return true
+        })
+        .slice()
+        .reverse()
+    })
+
+    const liveLogUpdatedAt = computed(() => {
+      const updatedAt = liveBattleSnapshot.value?.updatedAt
+      return updatedAt ? formatTime(updatedAt) : '--'
+    })
+
     function blurActiveElement() {
       if (document.activeElement && typeof document.activeElement.blur === 'function') {
         document.activeElement.blur()
@@ -220,6 +272,41 @@ export default {
       blurActiveElement()
     }
 
+    function readLiveBattleSnapshot() {
+      try {
+        const raw = window.localStorage.getItem('fightback:last-session')
+        if (!raw) {
+          liveBattleSnapshot.value = null
+          return
+        }
+
+        const parsed = JSON.parse(raw)
+        if (parsed?.level !== state.activeLevel.value.id) {
+          liveBattleSnapshot.value = parsed
+          return
+        }
+
+        liveBattleSnapshot.value = parsed
+      } catch (error) {
+        liveBattleSnapshot.value = null
+      }
+    }
+
+    function stopLiveLogPolling() {
+      if (liveLogTimerId) {
+        window.clearInterval(liveLogTimerId)
+        liveLogTimerId = null
+      }
+    }
+
+    function startLiveLogPolling() {
+      stopLiveLogPolling()
+      readLiveBattleSnapshot()
+      liveLogTimerId = window.setInterval(() => {
+        readLiveBattleSnapshot()
+      }, 1000)
+    }
+
     function handleGameReady() {
       if (pendingScroll.value) {
         pendingScroll.value = false
@@ -233,6 +320,9 @@ export default {
       if (ok) {
         battleInProgress.value = true
         pendingScroll.value = true
+        latestBattleResult.value = null
+        liveBattleSnapshot.value = null
+        startLiveLogPolling()
       }
     }
 
@@ -242,6 +332,9 @@ export default {
       if (ok) {
         battleInProgress.value = true
         pendingScroll.value = true
+        latestBattleResult.value = null
+        liveBattleSnapshot.value = null
+        startLiveLogPolling()
       }
     }
 
@@ -251,17 +344,23 @@ export default {
       if (ok) {
         battleInProgress.value = true
         pendingScroll.value = true
+        latestBattleResult.value = null
+        liveBattleSnapshot.value = null
+        startLiveLogPolling()
       }
     }
 
     function onBattleComplete(payload) {
       battleInProgress.value = false
       latestBattleResult.value = payload
+      readLiveBattleSnapshot()
+      stopLiveLogPolling()
       state.handleBattleComplete(payload)
     }
 
     function onBattleRestart() {
       battleInProgress.value = true
+      startLiveLogPolling()
     }
 
     function formatTime(value) {
@@ -270,6 +369,14 @@ export default {
       }
 
       return new Date(value).toLocaleString('zh-CN', { hour12: false })
+    }
+
+    function formatDebugTime(value) {
+      if (!value) {
+        return '--'
+      }
+
+      return new Date(value).toLocaleTimeString('zh-CN', { hour12: false })
     }
 
     function formatEnemyId(value) {
@@ -302,6 +409,9 @@ export default {
       const map = Object.fromEntries(
         state.characters.map(character => [character.id, character.name])
       )
+
+      map.player = '当前角色'
+      map['hpm-dream-catbug'] = '梦想猫虫'
 
       return map[value] || value || '当前角色'
     }
@@ -360,8 +470,38 @@ export default {
         const damage = formatDebugValue('totalDamage', detail.totalDamage)
         const lifeAfter = formatDebugValue('playerLifeAfter', detail.playerLifeAfter)
         const stunDuration = formatDebugValue('stunDurationMs', detail.stunDurationMs)
+        const targetName = formatDebugValue('targetId', detail.targetId)
 
-        return `${enemyName}发出的${projectileName}命中玩家，造成 ${damage} 点伤害，玩家剩余生命 ${lifeAfter}，并附带 ${stunDuration} 毫秒控制。`
+        return `${enemyName}发出的${projectileName}命中${targetName}，造成 ${damage} 点伤害；当前玩家生命 ${lifeAfter}；附带控制 ${stunDuration} 毫秒。`
+      }
+
+      if (entry.type === 'ally-heal') {
+        const targetName = formatDebugValue('targetId', detail.targetId)
+        const heal = formatDebugValue('healAmount', detail.healAmount)
+        return `${targetName}回复生命 ${heal} 点。`
+      }
+
+      if (entry.type === 'damage-to-ally') {
+        const targetName = formatDebugValue('targetId', detail.targetId)
+        const damage = formatDebugValue('totalDamage', detail.totalDamage)
+        const lifeAfter = formatDebugValue('allyLifeAfter', detail.allyLifeAfter)
+        return `${targetName}受到 ${damage} 点伤害，剩余生命 ${lifeAfter}。`
+      }
+
+      if (entry.type === 'hpm-extra-life-gained') {
+        return `原因：${formatDebugValue('reason', detail.reason)}；增加 ${formatDebugValue('amount', detail.amount)} 点额外生命；当前额外生命 ${formatDebugValue('extraLife', detail.extraLife)}；拳击共鸣 ${formatDebugValue('passivePunchLayers', detail.passivePunchLayers)} 层；飞踢共鸣 ${formatDebugValue('passiveKickLayers', detail.passiveKickLayers)} 层；被动护盾 ${formatDebugValue('passiveShieldCharges', detail.passiveShieldCharges)} 次。`
+      }
+
+      if (entry.type === 'hpm-protection-circle-created') {
+        return `保护圈已展开。范围半径 ${formatDebugValue('radius', detail.radius)}；持续 ${formatDebugValue('durationMs', detail.durationMs)} 毫秒。`
+      }
+
+      if (entry.type === 'hpm-aura-shield-granted') {
+        return `飞踢护盾已发放。当前自身飞踢护盾 ${formatDebugValue('playerAuraShieldCharges', detail.playerAuraShieldCharges)} 次；影响友方数量 ${formatDebugValue('allyCount', detail.allyCount)}。`
+      }
+
+      if (entry.type === 'hpm-summon-created') {
+        return `${formatDebugValue('targetId', detail.targetId)}已登场；继承角色：${formatDebugValue('inheritedCharacter', detail.inheritedCharacter)}；持续 ${formatDebugValue('durationMs', detail.durationMs)} 毫秒。`
       }
 
       const labels = {
@@ -409,6 +549,8 @@ export default {
         persistentDamageReduction: '常驻减伤比例',
         remainingPunchHealCharges: '剩余拳击回血次数',
         playerId: '角色标识',
+        targetId: '目标单位',
+        allyLifeAfter: '友方剩余生命',
         garlicForm: '大蒜形态',
         form: '当前形态',
         shieldCharges: '护盾次数',
@@ -434,11 +576,21 @@ export default {
         accumulatedStoneHeal: '石像累计回血',
         stunDurationMs: '眩晕时长',
         stunChance: '眩晕概率',
-        targetId: '锁定目标',
         fired: '是否发射',
         jumpBoostStacks: '跳跃增幅层数',
         jumpBoostRatio: '跳跃增幅比例',
-        remainingFatalGuardCharges: '剩余致命免疫次数'
+        remainingFatalGuardCharges: '剩余致命免疫次数',
+        extraLife: '额外生命',
+        passivePunchLayers: '拳击共鸣层数',
+        passiveKickLayers: '飞踢共鸣层数',
+        playerAuraShieldCharges: '飞踢护盾次数',
+        passiveShieldCharges: '被动护盾次数',
+        allyCount: '影响友方数量',
+        radius: '范围半径',
+        durationMs: '持续时间',
+        inheritedCharacter: '继承角色',
+        amount: '数值',
+        markHealCapRatio: '梦印回血上限比例'
       }
 
       return Object.entries(detail)
@@ -533,6 +685,24 @@ export default {
         '红啵啵': '红啵啵',
         'dream-catbug-mark-expired': '梦印到期回复',
         'dream-candy-heal': '想吃棒棒糖治疗',
+        'hpm-punch': 'hpm 共鸣拳击',
+        'hpm-note': 'hpm 音符',
+        'hpm-note-hit': 'hpm 音符命中回复',
+        'hpm-note-ally-heal': 'hpm 音符友方治疗',
+        'hpm-punch-self-heal': 'hpm 拳击自疗',
+        'hpm-punch-ally-heal': 'hpm 拳击友疗',
+        'hpm-protection-circle': 'hpm 保护圈治疗',
+        'hpm-dream-candy': '梦想猫虫治疗圈',
+        'hpm-extra-life-gained': 'hpm 额外生命增加',
+        'hpm-extra-life-decayed': 'hpm 额外生命衰减',
+        'hpm-protection-circle-created': 'hpm 保护圈展开',
+        'hpm-protection-circle-ended': 'hpm 保护圈结束',
+        'hpm-aura-shield-granted': 'hpm 飞踢护盾发放',
+        'hpm-summon-damage': '梦想猫虫命中',
+        'hpm-summon-created': '梦想猫虫登场',
+        'hpm-dream-catbug': '梦想猫虫',
+        'hpm-passive-shield': 'hpm 被动护盾',
+        'hpm-aura-shield': 'hpm 飞踢护盾',
         expired: '自然结束',
         'expired-after-defeat': '目标倒下后结束',
         'player-defeated': '玩家倒下',
@@ -558,6 +728,9 @@ export default {
       }
 
       if (key === 'targetId') {
+        if (String(value).startsWith('enemy') || String(value).startsWith('gabeng')) {
+          return formatEnemyId(value)
+        }
         return formatPlayerId(value)
       }
 
@@ -630,6 +803,8 @@ export default {
         'dream-catbug-mark-ended': '梦印结算',
         'dream-candy-summoned': '想吃棒棒糖生成',
         'dream-candy-ended': '想吃棒棒糖结束',
+        'ally-heal': '友方回复',
+        'damage-to-ally': '友方受击',
         'gabeng-arrow-lock': '嘎嘣锁定目标',
         'gabeng-arrow-fired': '嘎嘣发射箭矢',
         'gabeng-arrow-rate-updated': '嘎嘣箭矢概率变化',
@@ -644,12 +819,33 @@ export default {
         'iq45-stone-heal': 'IQ45 石像回血',
         'iq45-stone-bonus-heal': 'IQ45 石像补偿回血',
         'iq45-stone-burst': 'IQ45 石像反震',
+        'hpm-extra-life-gained': 'hpm 额外生命增加',
+        'hpm-extra-life-decayed': 'hpm 额外生命衰减',
+        'hpm-protection-circle-created': 'hpm 保护圈展开',
+        'hpm-protection-circle-ended': 'hpm 保护圈结束',
+        'hpm-aura-shield-granted': 'hpm 飞踢护盾发放',
+        'hpm-summon-damage': '梦想猫虫命中',
+        'hpm-summon-created': '梦想猫虫登场',
         '大蒜-形态切换': '大蒜形态切换',
         '大蒜-真身J结算': '大蒜真身 J 结算'
       }
 
       return titles[entry.type] || '战斗事件'
     }
+
+    onMounted(() => {
+      readLiveBattleSnapshot()
+    })
+
+    onBeforeUnmount(() => {
+      stopLiveLogPolling()
+    })
+
+    watch(battleInProgress, (isRunning) => {
+      if (!isRunning) {
+        stopLiveLogPolling()
+      }
+    })
 
     return {
       ...state,
@@ -659,6 +855,8 @@ export default {
       isFinalBossLevel,
       isGabengLevel,
       latestDebugLog,
+      liveDebugLog,
+      liveLogUpdatedAt,
       showRecordPanel,
       showRetryPanel,
       showNextLevelPanel,
@@ -669,6 +867,7 @@ export default {
       startBattle,
       startNextLevelBattle,
       formatTime,
+      formatDebugTime,
       formatDebugTitle,
       formatDebugDetail
     }
@@ -724,6 +923,10 @@ export default {
 .retry-panel,
 .record-panel {
   margin: 16px 0;
+}
+
+.live-record-panel {
+  border: 1px solid rgba(127, 231, 255, 0.22);
 }
 
 .ready-panel,

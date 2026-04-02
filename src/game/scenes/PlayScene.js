@@ -1,5 +1,6 @@
 import Phaser, { Scene } from 'phaser'
 import { normalizeBattleConfigShape } from '@/game/battleConfig'
+import { getCharacterById } from '@/data/gameContent'
 
 const playerWidth = 40
 const playerHeight = 94
@@ -11,6 +12,7 @@ let keyD
 let keyW
 let keyKick
 let keyPunch
+let keyUltimate
 let keyESC
 let scorePlayer
 let scoreTextPlayer
@@ -47,6 +49,7 @@ let playerInnateShieldCharges
 let playerInnateShieldReduction
 let playerNextPunchAt
 let playerNextKickAt
+let playerNextUltimateAt
 let playerEquipmentAuraTimer
 let playerJumpBoostStacks
 let playerJumpState
@@ -147,6 +150,7 @@ export default class PlayScene extends Scene {
     this.initializeStatistics()
     this.setUpBackground()
     this.setUpPlatforms()
+    this.createHpmNoteTexture()
     this.setUpPlayer()
     this.setUpInputKeys()
     this.setUpEnemyWave()
@@ -163,6 +167,8 @@ export default class PlayScene extends Scene {
   update() {
     this.updatePlayerState()
     this.handlePlayerInput()
+    this.updateHpmState()
+    this.updateAlliedSupportUnits()
     this.handleEnemyAI()
     this.updatePlayerProjectiles()
     this.updateEnemyProjectiles()
@@ -211,6 +217,7 @@ export default class PlayScene extends Scene {
     playerEquipmentPunchHealRatio = 0
     playerNextPunchAt = 0
     playerNextKickAt = 0
+    playerNextUltimateAt = 0
     playerEquipmentAuraTimer = null
     playerJumpBoostStacks = 0
     playerJumpState = {
@@ -238,6 +245,9 @@ export default class PlayScene extends Scene {
     playerMasteryPulseRing = null
     playerMasteryOrbitParticles = []
     playerMasteryDimUntil = 0
+    this.hpmState = this.createHpmState()
+    this.alliedCompanions = []
+    this.alliedZones = []
     playerInnateShieldCharges = this.battleConfig.player.baseAbilities?.shieldCharges || 0
     playerInnateShieldReduction = this.battleConfig.player.baseAbilities?.shieldReduction || 0
     playerEquipmentState = this.createPlayerEquipmentState()
@@ -353,6 +363,14 @@ export default class PlayScene extends Scene {
 
   getIQ45Config() {
     return this.battleConfig.player.abilities?.iq45 || {}
+  }
+
+  isHpmPlayer() {
+    return this.battleConfig?.player?.id === 'hpm'
+  }
+
+  getHpmConfig() {
+    return this.battleConfig.player.abilities?.hpm || {}
   }
 
   isDreamCatbugPlayer() {
@@ -502,6 +520,205 @@ export default class PlayScene extends Scene {
       repeated.push(nearest[Math.min(index, nearest.length - 1)])
     }
     return repeated
+  }
+
+  createHpmState() {
+    return {
+      extraLife: 0,
+      passivePunchLayers: 0,
+      passiveKickLayers: 0,
+      passiveShieldCharges: 0,
+      auraShieldCharges: 0,
+      lastSkillAt: -99999,
+      nextDecayAt: 0,
+      speedBoostUntil: 0,
+      protectionCircle: null,
+      summon: null
+    }
+  }
+
+  createHpmNoteTexture() {
+    if (this.textures.exists('hpm-note')) {
+      if (this.textures.exists('hpm-summon-laser')) {
+        return
+      }
+    } else {
+      const graphics = this.make.graphics({ x: 0, y: 0, add: false })
+      graphics.fillStyle(0xfff0a8, 1)
+      graphics.fillCircle(12, 12, 9)
+      graphics.fillStyle(0xff9ec4, 1)
+      graphics.fillRoundedRect(14, 4, 4, 14, 2)
+      graphics.fillRoundedRect(18, 4, 4, 10, 2)
+      graphics.generateTexture('hpm-note', 24, 24)
+      graphics.destroy()
+    }
+
+    if (this.textures.exists('hpm-summon-laser')) {
+      return
+    }
+
+    const laserGraphics = this.make.graphics({ x: 0, y: 0, add: false })
+    laserGraphics.fillStyle(0x9af6ff, 1)
+    laserGraphics.fillRoundedRect(0, 4, 54, 10, 5)
+    laserGraphics.fillStyle(0xffffff, 0.95)
+    laserGraphics.fillRoundedRect(6, 7, 42, 4, 2)
+    laserGraphics.generateTexture('hpm-summon-laser', 54, 18)
+    laserGraphics.destroy()
+  }
+
+  getDreamCatbugActor() {
+    return getCharacterById('dream-catbug')
+  }
+
+  getAlliedCompanions() {
+    return (this.alliedCompanions || []).filter((companion) => companion?.sprite?.active && companion.life > 0)
+  }
+
+  getAlliedTargets(includePlayer = true) {
+    const allies = []
+    if (includePlayer && player?.active && lifePlayer > 0) {
+      allies.push({
+        id: 'player',
+        kind: 'player',
+        sprite: player,
+        getLife: () => lifePlayer,
+        getMaxLife: () => maxLifePlayer
+      })
+    }
+
+    this.getAlliedCompanions().forEach((companion) => {
+      allies.push({
+        id: companion.id,
+        kind: 'companion',
+        sprite: companion.sprite,
+        companion
+      })
+    })
+
+    return allies
+  }
+
+  getNearestAllyTarget(originSprite, includePlayer = true) {
+    return this.getAlliedTargets(includePlayer)
+      .slice()
+      .sort((a, b) => (
+        Phaser.Math.Distance.Between(originSprite.x, originSprite.y, a.sprite.x, a.sprite.y) -
+        Phaser.Math.Distance.Between(originSprite.x, originSprite.y, b.sprite.x, b.sprite.y)
+      ))[0] || null
+  }
+
+  applyDamageToAllyTarget(target, totalDamage, detail = {}) {
+    if (!target || totalDamage <= 0) {
+      return 0
+    }
+
+    if (target.kind === 'player') {
+      const reducedDamage = this.getReducedPlayerDamage(totalDamage)
+      lastDamageTaken = reducedDamage
+      lifePlayer = roundToTenth(Math.max(0, lifePlayer - reducedDamage))
+      setPlayerValuebar(healthBarPlayer, this.toPercent(lifePlayer, maxLifePlayer))
+      this.recordEvent('damage-to-player', {
+        targetId: 'player',
+        totalDamage: reducedDamage,
+        playerLifeAfter: lifePlayer,
+        ...detail
+      })
+      return reducedDamage
+    }
+
+    const companion = target.companion
+    if (!companion?.sprite?.active || companion.life <= 0) {
+      return 0
+    }
+
+    let finalDamage = roundToTenth(totalDamage)
+    if (Number(companion.auraShieldCharges || 0) > 0) {
+      companion.auraShieldCharges -= 1
+      finalDamage = roundToTenth(finalDamage * (1 - Number(this.getHpmConfig().auraShieldReduction || 0.3)))
+    }
+
+    companion.life = roundToTenth(Math.max(0, companion.life - finalDamage))
+    lastDamageTaken = finalDamage
+    this.recordEvent('damage-to-ally', {
+      targetId: companion.id,
+      totalDamage: finalDamage,
+      allyLifeAfter: companion.life,
+      ...detail
+    })
+
+    if (companion.life <= 0) {
+      companion.sprite.destroy()
+    }
+    return finalDamage
+  }
+
+  getAlliesNear(originX, originY, radius, includePlayer = true) {
+    return this.getAlliedTargets(includePlayer).filter((target) => (
+      Phaser.Math.Distance.Between(originX, originY, target.sprite.x, target.sprite.y) <= radius
+    ))
+  }
+
+  hpmProtectionCircleActive() {
+    return Boolean(this.hpmState?.protectionCircle) && this.time.now < this.hpmState.protectionCircle.expiresAt
+  }
+
+  getHpmExtraLife() {
+    return roundToTenth(this.hpmState?.extraLife || 0)
+  }
+
+  gainHpmExtraLife(amount, reason) {
+    if (!this.isHpmPlayer()) {
+      return
+    }
+
+    const config = this.getHpmConfig()
+    const before = Number(this.hpmState.extraLife || 0)
+    const cap = Number(config.extraLifeCap || 40)
+    this.hpmState.extraLife = Math.min(cap, roundToTenth(before + Number(amount || 0)))
+    this.hpmState.lastSkillAt = this.time.now
+    this.hpmState.nextDecayAt = this.time.now + Number(config.extraLifeDecayDelayMs || 1000)
+
+    const beforeLayers = Math.floor(before / 10)
+    const afterLayers = Math.floor(this.hpmState.extraLife / 10)
+    const gainedLayers = Math.max(0, afterLayers - beforeLayers)
+    const maxLayers = Number(config.passiveMaxLayers || 4)
+
+    if (gainedLayers > 0) {
+      this.hpmState.passivePunchLayers = Math.min(maxLayers, this.hpmState.passivePunchLayers + gainedLayers)
+      this.hpmState.passiveKickLayers = Math.min(maxLayers, this.hpmState.passiveKickLayers + gainedLayers)
+      this.hpmState.passiveShieldCharges = Math.min(maxLayers, this.hpmState.passiveShieldCharges + gainedLayers)
+    }
+
+    this.recordEvent('hpm-extra-life-gained', {
+      reason,
+      amount: Number(amount || 0),
+      extraLife: this.hpmState.extraLife,
+      passivePunchLayers: this.hpmState.passivePunchLayers,
+      passiveKickLayers: this.hpmState.passiveKickLayers,
+      passiveShieldCharges: this.hpmState.passiveShieldCharges
+    })
+  }
+
+  getHpmProtectionBonuses() {
+    if (!this.isHpmPlayer() || !this.hpmProtectionCircleActive()) {
+      return {
+        punchBonus: 0,
+        kickBonus: 0
+      }
+    }
+
+    const circle = this.hpmState.protectionCircle
+    const config = this.getHpmConfig()
+    const inside = Phaser.Math.Distance.Between(player.x, player.y, circle.x, circle.y) <= Number(config.protectionCircleRadius || 155)
+    return inside
+      ? {
+        punchBonus: Number(config.protectionCirclePunchBonus || 7),
+        kickBonus: Number(config.protectionCircleKickBonus || 8)
+      }
+      : {
+        punchBonus: 0,
+        kickBonus: 0
+      }
   }
 
   getPlayerJumpBoostRatio() {
@@ -733,11 +950,14 @@ export default class PlayScene extends Scene {
   getPlayerMoveSpeed() {
     const baseSpeed = this.battleConfig.player.stats.moveSpeed
     const equipmentSpeedDelta = this.getEquipmentBonusDelta('moveSpeed')
+    const hpmBonus = this.isHpmPlayer() && this.time.now < this.hpmState.speedBoostUntil
+      ? Number(this.getHpmConfig().ultimateMoveSpeedBonus || 90)
+      : 0
     if (!this.isGarlicTrueForm()) {
-      return baseSpeed + equipmentSpeedDelta
+      return baseSpeed + equipmentSpeedDelta + hpmBonus
     }
 
-    return baseSpeed + equipmentSpeedDelta + (this.getGarlicConfig().trueFormMoveSpeedBonus || 0)
+    return baseSpeed + equipmentSpeedDelta + hpmBonus + (this.getGarlicConfig().trueFormMoveSpeedBonus || 0)
   }
 
   getDreamCatbugMarkState(target) {
@@ -1137,6 +1357,11 @@ export default class PlayScene extends Scene {
       return `梦想猫虫状态：梦印 ${markedCount} / 糖灵 ${this.formatNumber(candyRemainingMs / 1000)} 秒`
     }
 
+    if (this.isHpmPlayer()) {
+      const remainingUltimate = Math.max(0, playerNextUltimateAt - this.time.now)
+      return `hpm 状态：额外生命 ${this.formatNumber(this.getHpmExtraLife())} / 被动盾 ${this.hpmState.passiveShieldCharges} / 飞踢盾 ${this.hpmState.auraShieldCharges} / L ${this.formatNumber(remainingUltimate / 1000)} 秒`
+    }
+
     return `${this.battleConfig.player.name} 状态：常态`
   }
 
@@ -1265,6 +1490,59 @@ export default class PlayScene extends Scene {
     if (playerStatusText) {
       playerStatusText.setText(this.getPlayerStatusLabel())
     }
+  }
+
+  updateHpmState() {
+    if (!this.isHpmPlayer()) {
+      return
+    }
+
+    const config = this.getHpmConfig()
+    const decayDelayMs = Number(config.extraLifeDecayDelayMs || 1000)
+    const decayIntervalMs = Number(config.extraLifeDecayIntervalMs || 500)
+    const decayStep = Number(config.extraLifeDecayStep || 10)
+
+    if (this.time.now >= this.hpmState.nextDecayAt && this.time.now - this.hpmState.lastSkillAt >= decayDelayMs && this.hpmState.extraLife > 0) {
+      this.hpmState.extraLife = Math.max(0, roundToTenth(this.hpmState.extraLife - decayStep))
+      this.hpmState.nextDecayAt = this.time.now + decayIntervalMs
+      this.recordEvent('hpm-extra-life-decayed', {
+        extraLife: this.hpmState.extraLife
+      })
+    }
+
+    if (this.hpmState.protectionCircle && this.time.now >= this.hpmState.protectionCircle.expiresAt) {
+      this.hpmState.protectionCircle.circle?.destroy()
+      this.hpmState.protectionCircle.border?.destroy()
+      this.hpmState.protectionCircle = null
+      this.recordEvent('hpm-protection-circle-ended', {
+        reason: 'timeout'
+      })
+    }
+
+    if (this.hpmProtectionCircleActive()) {
+      const circle = this.hpmState.protectionCircle
+      circle.circle?.setAlpha(0.12 + Math.sin(this.time.now / 130) * 0.03)
+      circle.border?.setAlpha(0.55 + Math.sin(this.time.now / 180) * 0.12)
+
+      if (this.time.now >= circle.nextTickAt) {
+        circle.nextTickAt = this.time.now + Number(config.protectionCircleTickMs || 1000)
+        const healAmount = roundToTenth(this.getHpmExtraLife() * Number(config.protectionCircleHealRatio || 0.05))
+        this.getAlliesNear(circle.x, circle.y, Number(config.protectionCircleRadius || 155)).forEach((ally) => {
+          this.healAllyTarget(ally, healAmount, 'hpm-protection-circle')
+        })
+      }
+    }
+
+    if (this.time.now >= this.hpmState.speedBoostUntil && player.tintTopLeft === 0xc6fff4) {
+      player.clearTint()
+    } else if (this.time.now < this.hpmState.speedBoostUntil) {
+      player.setTint(0xc6fff4)
+    }
+  }
+
+  updateAlliedSupportUnits() {
+    this.updateHpmSummon()
+    this.updateAlliedZones()
   }
 
   updatePlayerJumpState() {
@@ -1438,7 +1716,11 @@ export default class PlayScene extends Scene {
       return
     }
 
-    if (this.availableHitJustDown(keyKick) && now >= playerNextKickAt) {
+    if (this.isHpmPlayer() && this.availableHitJustDown(keyUltimate) && now >= playerNextUltimateAt) {
+      justDownPlayer = true
+      playerNextUltimateAt = now + this.getPlayerUltimateCooldown()
+      this.executeHpmUltimate()
+    } else if (this.availableHitJustDown(keyKick) && now >= playerNextKickAt) {
       justDownPlayer = true
       playerNextKickAt = now + this.getPlayerAttackCooldown('kick')
       this.doAnim(player, 'jumpkick')
@@ -1663,6 +1945,223 @@ export default class PlayScene extends Scene {
     }, config.trueKickRecoverToFakeDelayMs || 520)
   }
 
+  healAllyTarget(target, amount, reason) {
+    const normalizedAmount = roundToTenth(Math.max(0, Number(amount || 0)))
+    if (!target || normalizedAmount <= 0) {
+      return 0
+    }
+
+    if (target.kind === 'player') {
+      return this.healPlayer(normalizedAmount, reason, {
+        targetId: 'player'
+      })
+    }
+
+    const companion = target.companion
+    if (!companion?.sprite?.active || companion.life <= 0) {
+      return 0
+    }
+
+    const before = companion.life
+    companion.life = roundToTenth(Math.min(companion.maxLife, companion.life + normalizedAmount))
+    const actualHeal = roundToTenth(companion.life - before)
+    if (actualHeal > 0) {
+      this.recordEvent('ally-heal', {
+        reason,
+        targetId: companion.id,
+        healAmount: actualHeal,
+        allyLifeAfter: companion.life
+      })
+    }
+    return actualHeal
+  }
+
+  reduceHpmUltimateCooldown() {
+    if (!this.isHpmPlayer()) {
+      return
+    }
+
+    const now = this.time.now
+    const remaining = Math.max(0, playerNextUltimateAt - now)
+    playerNextUltimateAt = now + remaining * 0.5
+  }
+
+  executeHpmPunch() {
+    const config = this.getHpmConfig()
+    this.gainHpmExtraLife(Number(config.punchGainExtraLife || 10), 'punch-cast')
+
+    const target = this.getEnemyInRange(124, 96, player)
+    if (target) {
+      const totalDamage = roundToTenth(Number(config.punchDamageBase || 50) + this.getPlayerPunchDamage() * Number(config.punchDamageRatio || 0.15))
+      const connected = this.applyFlatDamageToEnemy(target, totalDamage, 'hpm-punch', {
+        baseDamage: totalDamage
+      })
+      if (connected) {
+        const direction = player.flipX ? -1 : 1
+        target.sprite.setVelocity(direction * Number(config.punchKnockbackX || 280), -80)
+      }
+    }
+
+    const selfHeal = roundToTenth(Number(config.punchSelfHealBase || 75) + this.getHpmExtraLife() * Number(config.punchSelfHealExtraLifeRatio || 0.1))
+    this.healPlayer(selfHeal, 'hpm-punch-self-heal', {
+      extraLife: this.getHpmExtraLife()
+    })
+    this.reduceHpmUltimateCooldown()
+
+    const allyHeal = roundToTenth(this.getHpmExtraLife() * Number(config.punchAllyHealRatio || 0.2))
+    this.getAlliesNear(player.x, player.y, Number(config.punchAllyHealRadius || 170), false).forEach((ally) => {
+      this.healAllyTarget(ally, allyHeal, 'hpm-punch-ally-heal')
+    })
+  }
+
+  createHpmProtectionCircle() {
+    const config = this.getHpmConfig()
+    const radius = Number(config.protectionCircleRadius || 155)
+    const circle = this.add.circle(player.x, player.y, radius, 0x72f3db, 0.12).setDepth(5)
+    const border = this.add.circle(player.x, player.y, radius, 0x72f3db, 0).setStrokeStyle(3, 0xd9fff7, 0.7).setDepth(6)
+    this.hpmState.protectionCircle = {
+      x: player.x,
+      y: player.y,
+      radius,
+      circle,
+      border,
+      nextTickAt: this.time.now + Number(config.protectionCircleTickMs || 1000),
+      expiresAt: this.time.now + Number(config.protectionCircleDurationMs || 4000)
+    }
+
+    this.getHostileTargetsNearPlayer(radius, radius).forEach((enemyState) => {
+      const direction = enemyState.sprite.x >= player.x ? 1 : -1
+      enemyState.sprite.setVelocity(direction * Number(config.protectionCircleKnockbackX || 260), -80)
+    })
+
+    this.recordEvent('hpm-protection-circle-created', {
+      radius,
+      durationMs: Number(config.protectionCircleDurationMs || 4000)
+    })
+  }
+
+  executeHpmKick() {
+    const config = this.getHpmConfig()
+    this.gainHpmExtraLife(Number(config.kickGainExtraLife || 20), 'kick-cast')
+
+    const target = this.getEnemyInRange(124 + this.getPlayerKickRangeBonus(), 138, player)
+    if (target) {
+      this.applyDamageToEnemy(target, this.getPlayerKickDamage(), 'kick')
+    }
+
+    if (!this.hpmProtectionCircleActive()) {
+      this.createHpmProtectionCircle()
+      return
+    }
+
+    const allies = this.getAlliesNear(player.x, player.y, Number(config.auraShieldGrantRadius || 185))
+    const maxCharges = Number(config.auraShieldMaxCharges || 4)
+    allies.forEach((ally) => {
+      if (ally.kind === 'player') {
+        this.hpmState.auraShieldCharges = Math.min(maxCharges, this.hpmState.auraShieldCharges + 1)
+      } else if (ally.companion) {
+        ally.companion.auraShieldCharges = Math.min(maxCharges, Number(ally.companion.auraShieldCharges || 0) + 1)
+      }
+    })
+
+    this.recordEvent('hpm-aura-shield-granted', {
+      playerAuraShieldCharges: this.hpmState.auraShieldCharges,
+      allyCount: allies.length
+    })
+  }
+
+  spawnHpmNoteProjectile(index) {
+    const config = this.getHpmConfig()
+    const direction = player.flipX ? -1 : 1
+    const projectile = playerProjectiles.create(player.x + direction * 28, player.y - 26, 'hpm-note')
+    projectile.setDepth(8)
+    projectile.setCollideWorldBounds(true)
+    projectile.setBounce(1, 1)
+    projectile.body.setAllowGravity(false)
+    projectile.body.onWorldBounds = true
+    projectile.setVelocity(direction * Number(config.noteSpeed || 430), Math.sin(index * 0.75) * 110)
+    projectile.displayWidth = Number(config.noteDisplayWidth || 24)
+    projectile.displayHeight = Number(config.noteDisplayHeight || 24)
+    projectile.projectileKind = 'hpm-note'
+    projectile.spawnedAt = this.time.now
+  }
+
+  summonHpmDreamCatbug() {
+    const config = this.getHpmConfig()
+    const actor = this.getDreamCatbugActor()
+    const actorDreamConfig = actor?.abilities?.dreamCatbug || {}
+    const existing = this.getAlliedCompanions().find((companion) => companion.type === 'hpm-dream-catbug')
+    if (existing) {
+      existing.life = existing.maxLife
+      existing.expiresAt = this.time.now + Number(config.summonDurationMs || 25000)
+      return
+    }
+
+    const sprite = this.physics.add.sprite(
+      player.x + (player.flipX ? -1 : 1) * Number(config.summonSpawnOffsetX || 56),
+      player.y - 12,
+      'brawler2'
+    )
+    sprite.setSize(playerWidth, playerHeight)
+    sprite.setOffset(15, 5)
+    sprite.scaleX = 1.7
+    sprite.scaleY = 1.7
+    sprite.setDepth(7)
+    sprite.setCollideWorldBounds(true)
+    sprite.setBounce(0, 0)
+    sprite.body.setAllowGravity(true)
+    this.physics.add.collider(sprite, platforms)
+    this.doAnim(sprite, 'idle2')
+    sprite.setTint(0x9ef0ff)
+
+    this.alliedCompanions.push({
+      id: 'hpm-dream-catbug',
+      type: 'hpm-dream-catbug',
+      actor,
+      sprite,
+      life: Number(actor?.stats?.health || config.summonHealth || 550),
+      maxLife: Number(actor?.stats?.health || config.summonHealth || 550),
+      stats: { ...(actor?.stats || {}) },
+      abilities: {
+        ...(actor?.abilities || {}),
+        dreamCatbug: { ...actorDreamConfig }
+      },
+      attackCooldowns: {
+        ...(actor?.attackCooldowns || { punchMs: 390, kickMs: 450 })
+      },
+      nextPunchAt: 0,
+      nextKickAt: 0,
+      nextDecisionAt: 0,
+      actionLockUntil: this.time.now + 400,
+      nextZoneAt: 0,
+      auraShieldCharges: 0,
+      expiresAt: this.time.now + Number(config.summonDurationMs || 25000)
+    })
+
+    this.recordEvent('hpm-summon-created', {
+      targetId: 'hpm-dream-catbug',
+      durationMs: Number(config.summonDurationMs || 25000),
+      inheritedCharacter: actor?.name || '梦想猫虫'
+    })
+  }
+
+  executeHpmUltimate() {
+    const config = this.getHpmConfig()
+    this.gainHpmExtraLife(Number(config.ultimateGainExtraLife || 10), 'ultimate-cast')
+    this.hpmState.speedBoostUntil = this.time.now + Number(config.ultimateSpeedDurationMs || 4000)
+    this.summonHpmDreamCatbug()
+    for (let index = 0; index < Number(config.noteCount || 6); index += 1) {
+      window.setTimeout(() => {
+        if (player?.active && lifePlayer > 0) {
+          this.spawnHpmNoteProjectile(index)
+        }
+      }, index * Number(config.noteIntervalMs || 120))
+    }
+    window.setTimeout(() => {
+      justDownPlayer = false
+    }, Math.max(360, Number(config.noteCount || 6) * Number(config.noteIntervalMs || 120)))
+  }
+
   executeWudiPunch() {
     const config = this.getWudiConfig()
     const direction = player.flipX ? -1 : 1
@@ -1815,12 +2314,204 @@ export default class PlayScene extends Scene {
     }, totalDuration)
   }
 
+  createAlliedZone({ x, y, radius, amount, intervalMs, durationMs, source, ownerId }) {
+    const circle = this.add.circle(x, y, 18, 0xf7a8d8, 0.75).setDepth(6)
+    this.alliedZones.push({
+      x,
+      y,
+      radius,
+      amount,
+      intervalMs,
+      nextTickAt: this.time.now + intervalMs,
+      expiresAt: this.time.now + durationMs,
+      source,
+      ownerId,
+      circle
+    })
+  }
+
+  updateAlliedZones() {
+    this.alliedZones = (this.alliedZones || []).filter((zone) => {
+      if (!zone?.circle?.active || this.time.now >= zone.expiresAt) {
+        zone?.circle?.destroy()
+        return false
+      }
+
+      zone.circle.setAlpha(0.5 + Math.sin(this.time.now / 150) * 0.18)
+      if (this.time.now < zone.nextTickAt) {
+        return true
+      }
+
+      zone.nextTickAt = this.time.now + zone.intervalMs
+      this.getAlliesNear(zone.x, zone.y, zone.radius).forEach((ally) => {
+        this.healAllyTarget(ally, zone.amount, zone.source)
+      })
+      return true
+    })
+  }
+
+  getCompanionMarkState(target) {
+    return target?.hpmDreamMark || null
+  }
+
+  getCompanionMarkedDamageMultiplier(target) {
+    const markState = this.getCompanionMarkState(target)
+    if (!markState || this.time.now >= markState.expiresAt) {
+      return 1
+    }
+    return Number(this.getHpmConfig().summonMarkedDamageMultiplier || 2)
+  }
+
+  applyCompanionMark(target, totalDamage) {
+    const companion = this.getAlliedCompanions().find((ally) => ally.id === 'hpm-dream-catbug')
+    const config = companion?.abilities?.dreamCatbug || this.getHpmConfig()
+    const active = this.getCompanionMarkState(target)
+    if (active && this.time.now < active.expiresAt) {
+      active.accumulatedDamage = roundToTenth(active.accumulatedDamage + totalDamage)
+      return
+    }
+
+    target.hpmDreamMark = {
+      appliedAt: this.time.now,
+      expiresAt: this.time.now + Number(config.summonMarkDurationMs || 3000),
+      accumulatedDamage: roundToTenth(totalDamage)
+    }
+  }
+
+  resolveCompanionMark(target, companion) {
+    const markState = this.getCompanionMarkState(target)
+    if (!markState) {
+      return
+    }
+
+    const config = companion?.abilities?.dreamCatbug || this.getHpmConfig()
+    const healCap = roundToTenth(companion.maxLife * Number(config.summonMarkHealCapRatio || 0.25))
+    const healAmount = Math.min(
+      healCap,
+      roundToTenth(Number(markState.accumulatedDamage || 0) * Number(config.summonMarkHealRatio || 0.35))
+    )
+    target.hpmDreamMark = null
+    companion.life = roundToTenth(Math.min(companion.maxLife, companion.life + healAmount))
+  }
+
+  applyCompanionDamageToEnemy(companion, target, totalDamage, attackType) {
+    if (!companion?.sprite?.active || !target?.sprite?.active || target.life <= 0) {
+      return false
+    }
+
+    const normalizedDamage = roundToTenth(totalDamage * this.getCompanionMarkedDamageMultiplier(target))
+    target.life = roundToTenth(Math.max(0, target.life - normalizedDamage))
+    lastDamageDealt = normalizedDamage
+    scorePlayer = roundToTenth(scorePlayer + normalizedDamage)
+    this.refreshEnemyUi()
+    this.applyCompanionMark(target, normalizedDamage)
+    this.recordEvent('hpm-summon-damage', {
+      attackType,
+      enemyId: target.id,
+      totalDamage: normalizedDamage,
+      enemyLifeAfter: target.life
+    })
+    this.handleEnemyDefeat(target)
+    return true
+  }
+
+  updateHpmSummon() {
+    this.alliedCompanions = this.getAlliedCompanions().filter((companion) => {
+      const dreamConfig = companion?.abilities?.dreamCatbug || {}
+      const punchProjectiles = companion?.abilities?.attackProjectiles?.punch || []
+      const laserConfig = punchProjectiles[0] || {}
+
+      this.enemies.forEach((enemyState) => {
+        if (enemyState?.hpmDreamMark && this.time.now >= enemyState.hpmDreamMark.expiresAt) {
+          this.resolveCompanionMark(enemyState, companion)
+        }
+      })
+
+      if (!companion?.sprite?.active || companion.life <= 0 || this.time.now >= companion.expiresAt) {
+        companion?.sprite?.clearTint()
+        companion?.sprite?.destroy()
+        return false
+      }
+
+      const target = this.getNearestEnemies(1, companion.sprite)[0]
+      if (!target) {
+        return true
+      }
+
+      const deltaX = target.sprite.x - companion.sprite.x
+      const absDeltaX = Math.abs(deltaX)
+      const verticalGap = Math.abs(target.sprite.y - companion.sprite.y)
+      const direction = deltaX >= 0 ? 1 : -1
+      companion.sprite.flipX = direction < 0
+
+      if (this.time.now < Number(companion.actionLockUntil || 0) || this.time.now < Number(companion.nextDecisionAt || 0)) {
+        this.doAnim(companion.sprite, absDeltaX > 74 ? 'walk2' : 'idle2')
+        if (absDeltaX > 74) {
+          companion.sprite.setVelocityX(direction * Number(companion.stats.moveSpeed || 210))
+        } else {
+          companion.sprite.setVelocityX(0)
+        }
+        return true
+      }
+
+      if (this.time.now >= companion.nextKickAt && absDeltaX < 118 && verticalGap < 138) {
+        companion.nextKickAt = this.time.now + Number(companion.attackCooldowns?.kickMs || 450)
+        companion.actionLockUntil = this.time.now + Math.max(260, Number(companion.attackCooldowns?.kickMs || 450) * 0.85)
+        companion.nextDecisionAt = this.time.now + 180
+        this.doAnim(companion.sprite, 'jumpkick2')
+        if (this.applyCompanionDamageToEnemy(companion, target, Number(companion.stats.kickDamage || 65), 'kick')) {
+          this.createAlliedZone({
+            x: companion.sprite.x,
+            y: companion.sprite.y - 16,
+            radius: Number(dreamConfig.summonHealRadius || 169),
+            amount: Number(dreamConfig.summonHealAmount || 16.9),
+            intervalMs: Number(dreamConfig.summonHealIntervalMs || 480),
+            durationMs: Number(dreamConfig.summonDurationMs || 3900),
+            source: 'hpm-dream-candy',
+            ownerId: companion.id
+          })
+        }
+        return true
+      }
+
+      if (this.time.now >= companion.nextPunchAt && absDeltaX < 112 && verticalGap < 95) {
+        companion.nextPunchAt = this.time.now + Number(companion.attackCooldowns?.punchMs || 390)
+        companion.actionLockUntil = this.time.now + Math.max(220, Number(companion.attackCooldowns?.punchMs || 390) * 0.85)
+        companion.nextDecisionAt = this.time.now + 160
+        this.doAnim(companion.sprite, 'punch2')
+        if (this.applyCompanionDamageToEnemy(companion, target, Number(companion.stats.punchDamage || 55), 'punch')) {
+          const projectile = playerProjectiles.create(companion.sprite.x + direction * 22, companion.sprite.y - 16, 'hpm-summon-laser')
+          projectile.setDepth(8)
+          projectile.body.setAllowGravity(false)
+          projectile.setVelocity(direction * Number(laserConfig.speed || dreamConfig.laserSpeed || 605), 0)
+          projectile.displayWidth = Number(laserConfig.displayWidth || dreamConfig.laserDisplayWidth || 54)
+          projectile.displayHeight = Number(laserConfig.displayHeight || dreamConfig.laserDisplayHeight || 18)
+          projectile.projectileKind = 'hpm-summon-laser'
+          projectile.projectileDamage = Number(laserConfig.damage || dreamConfig.laserDamage || 19.3)
+          projectile.maxTravelDistance = Number(laserConfig.maxTravelDistance || dreamConfig.laserMaxTravelDistance || 176)
+          projectile.startX = companion.sprite.x + direction * 22
+          projectile.startY = companion.sprite.y - 16
+        }
+        return true
+      }
+
+      if (absDeltaX > 74) {
+        this.doAnim(companion.sprite, 'walk2')
+        companion.sprite.setVelocityX(direction * Number(companion.stats.moveSpeed || 210))
+      } else {
+        this.doAnim(companion.sprite, 'idle2')
+        companion.sprite.setVelocityX(0)
+      }
+      return true
+    })
+  }
+
   handleEnemyAI() {
     if (this.time.now < this.phaseTransitionUntil || lifePlayer <= 0) {
       return
     }
 
-    if (this.isPlayerUntargetable()) {
+    if (this.isPlayerUntargetable() && !this.getAlliedCompanions().length) {
       this.livingEnemies().forEach((enemyState) => {
         enemyState.nextDecisionAt = Math.max(enemyState.nextDecisionAt, this.time.now + 120)
         this.stop(enemyState.sprite)
@@ -1832,18 +2523,20 @@ export default class PlayScene extends Scene {
     this.livingEnemies().forEach((enemyState) => {
       const enemySprite = enemyState.sprite
       const now = this.time.now
+      const target = this.getNearestAllyTarget(enemySprite)
 
       this.tryGabengArrowAttack(enemyState)
 
-      if (enemyState.justDown || now < enemyState.actionLockUntil) {
+      if (!target || enemyState.justDown || now < enemyState.actionLockUntil) {
         return
       }
 
-      const deltaX = player.x - enemySprite.x
+      const targetSprite = target.sprite
+      const deltaX = targetSprite.x - enemySprite.x
       const absDeltaX = Math.abs(deltaX)
-      const verticalGap = Math.abs(player.y - enemySprite.y)
-      const playerStandingStill = Math.abs(player.body.velocity.x) < 8
-      const playerGrounded = player.body.touching.down
+      const verticalGap = Math.abs(targetSprite.y - enemySprite.y)
+      const targetStandingStill = Math.abs(targetSprite.body?.velocity?.x || 0) < 8
+      const targetGrounded = Boolean(targetSprite.body?.touching?.down || targetSprite.body?.blocked?.down)
       const enemyGrounded = enemySprite.body.touching.down
 
       if (now < enemyState.repositionUntil) {
@@ -1866,8 +2559,8 @@ export default class PlayScene extends Scene {
         return
       }
 
-      if (playerGrounded && enemyGrounded && verticalGap < 90 && absDeltaX < 132) {
-        const shouldKick = absDeltaX > 88 || playerStandingStill || enemyState.life < enemyState.maxLife * 0.55
+      if (targetGrounded && enemyGrounded && verticalGap < 90 && absDeltaX < 132) {
+        const shouldKick = absDeltaX > 88 || targetStandingStill || enemyState.life < enemyState.maxLife * 0.55
         const punchReady = now >= enemyState.nextPunchAt
         const kickReady = now >= enemyState.nextKickAt
 
@@ -1881,7 +2574,7 @@ export default class PlayScene extends Scene {
           enemyState.nextKickAt = now + this.getEnemyAttackCooldown('kick')
           this.doAnim(enemySprite, 'jumpkick2')
           this.stopIfWalking(enemySprite)
-          this.setEnemyJumpkickTimeout(enemyState)
+          this.setEnemyJumpkickTimeout(enemyState, target)
         } else {
           if (!punchReady) {
             enemyState.justDown = false
@@ -1891,7 +2584,7 @@ export default class PlayScene extends Scene {
           enemyState.nextPunchAt = now + this.getEnemyAttackCooldown('punch')
           this.doAnim(enemySprite, 'punch2')
           this.stopIfWalking(enemySprite)
-          this.setEnemyPunchTimeout(enemyState)
+          this.setEnemyPunchTimeout(enemyState, target)
         }
         enemyState.actionLockUntil = now + Math.max(130, enemyState.stats.reactionDelay - 150)
         enemyState.pressureUntil = now + 420
@@ -1899,7 +2592,7 @@ export default class PlayScene extends Scene {
         return
       }
 
-      if (playerStandingStill && playerGrounded && enemyGrounded && verticalGap < 90 && absDeltaX < 170) {
+      if (targetStandingStill && targetGrounded && enemyGrounded && verticalGap < 90 && absDeltaX < 170) {
         this.doAnim(enemySprite, 'walk2')
         if (deltaX > 0) {
           this.moveRight(enemySprite)
@@ -1912,12 +2605,12 @@ export default class PlayScene extends Scene {
       }
 
       const shouldAttemptJump = (
-        player.y + 130 < enemySprite.y &&
+        targetSprite.y + 130 < enemySprite.y &&
         enemyGrounded &&
         absDeltaX > 118 &&
         absDeltaX < 168 &&
         now - enemyState.lastJumpAt > 2200 &&
-        Math.abs(player.body.velocity.y) > 80 &&
+        Math.abs(targetSprite.body?.velocity?.y || 0) > 80 &&
         Math.random() < 0.28
       )
 
@@ -1981,6 +2674,14 @@ export default class PlayScene extends Scene {
   setPlayerJumpkickTimeout() {
     if (this.isWudiPlayer()) {
       this.executeWudiKick()
+      return
+    }
+
+    if (this.isHpmPlayer()) {
+      this.executeHpmKick()
+      window.setTimeout(() => {
+        justDownPlayer = false
+      }, this.getPlayerAttackCooldown('kick'))
       return
     }
 
@@ -2080,9 +2781,9 @@ export default class PlayScene extends Scene {
     }, this.getPlayerAttackCooldown('kick'))
   }
 
-  setEnemyJumpkickTimeout(enemyState) {
+  setEnemyJumpkickTimeout(enemyState, target) {
     enemyState.hitPlayer = false
-    this.setEnemyScoreCalcTimeout(enemyState, [150, 200, 250, 300, 330, 360], enemyState.stats.kickDamage, 114, 138)
+    this.setEnemyScoreCalcTimeout(enemyState, target, [150, 200, 250, 300, 330, 360], enemyState.stats.kickDamage, 114, 138)
     window.setTimeout(() => {
       this.handleEnemyAttackRecovery(enemyState, 'kick')
       enemyState.justDown = false
@@ -2095,6 +2796,14 @@ export default class PlayScene extends Scene {
       window.setTimeout(() => {
         justDownPlayer = false
       }, this.getWudiConfig().punchDashDurationMs || this.getPlayerAttackCooldown('punch'))
+      return
+    }
+
+    if (this.isHpmPlayer()) {
+      this.executeHpmPunch()
+      window.setTimeout(() => {
+        justDownPlayer = false
+      }, this.getPlayerAttackCooldown('punch'))
       return
     }
 
@@ -2135,9 +2844,9 @@ export default class PlayScene extends Scene {
     }, this.getPlayerAttackCooldown('punch'))
   }
 
-  setEnemyPunchTimeout(enemyState) {
+  setEnemyPunchTimeout(enemyState, target) {
     enemyState.hitPlayer = false
-    this.setEnemyScoreCalcTimeout(enemyState, [70, 110, 150, 200, 245, 290, 330], enemyState.stats.punchDamage, 113, 90)
+    this.setEnemyScoreCalcTimeout(enemyState, target, [70, 110, 150, 200, 245, 290, 330], enemyState.stats.punchDamage, 113, 90)
     window.setTimeout(() => {
       this.handleEnemyAttackRecovery(enemyState, 'punch')
       enemyState.justDown = false
@@ -2154,6 +2863,10 @@ export default class PlayScene extends Scene {
     return attackType === 'kick' ? (cooldowns.kickMs || 450) : (cooldowns.punchMs || 390)
   }
 
+  getPlayerUltimateCooldown() {
+    return Number(this.battleConfig.player.abilities?.ultimateCooldownMs || 25000)
+  }
+
   getPlayerPunchDamage() {
     const equipmentDamageDelta = this.getEquipmentBonusDelta('punchDamage')
     if (this.battleConfig.player.id === 'starter') {
@@ -2166,14 +2879,39 @@ export default class PlayScene extends Scene {
       return roundToTenth(this.battleConfig.player.stats.punchDamage + equipmentDamageDelta + missingLifeBonus + kickComboBonus)
     }
 
+    if (this.isHpmPlayer()) {
+      const config = this.getHpmConfig()
+      const circleBonus = this.getHpmProtectionBonuses().punchBonus
+      return roundToTenth(
+        this.battleConfig.player.stats.punchDamage +
+        equipmentDamageDelta +
+        Number(config.passivePunchBonusPerLayer || 6) * Number(this.hpmState.passivePunchLayers || 0) +
+        circleBonus
+      )
+    }
+
     return roundToTenth(this.battleConfig.player.stats.punchDamage + equipmentDamageDelta)
   }
 
   getPlayerKickDamage() {
+    if (this.isHpmPlayer()) {
+      const config = this.getHpmConfig()
+      const circleBonus = this.getHpmProtectionBonuses().kickBonus
+      return roundToTenth(
+        this.battleConfig.player.stats.kickDamage +
+        this.getEquipmentBonusDelta('kickDamage') +
+        Number(config.passiveKickBonusPerLayer || 8) * Number(this.hpmState.passiveKickLayers || 0) +
+        circleBonus
+      )
+    }
+
     return roundToTenth(this.battleConfig.player.stats.kickDamage + this.getEquipmentBonusDelta('kickDamage'))
   }
 
   getPlayerKickRangeBonus() {
+    if (this.isHpmPlayer()) {
+      return Number(this.getHpmConfig().kickRangeBonus || 0)
+    }
     return this.battleConfig.player.abilities?.kickRangeBonus || 0
   }
 
@@ -2279,6 +3017,41 @@ export default class PlayScene extends Scene {
         return
       }
 
+      if (projectile.projectileKind === 'hpm-note') {
+        const enemyTarget = this.livingEnemies().find((enemyState) => (
+          enemyState.sprite?.active &&
+          Phaser.Geom.Intersects.RectangleToRectangle(projectile.getBounds(), enemyState.sprite.getBounds())
+        ))
+        if (enemyTarget) {
+          const config = this.getHpmConfig()
+          const healAmount = roundToTenth(Number(config.noteHealBase || 6) + this.getHpmExtraLife() * Number(config.noteHealExtraLifeRatio || 0.1))
+          const damage = roundToTenth(Number(config.noteDamageBase || 8) + this.getPlayerKickDamage() * Number(config.noteDamageKickRatio || 0.2))
+          this.healPlayer(healAmount, 'hpm-note-hit', { targetId: enemyTarget.id })
+          this.applyFlatDamageToEnemy(enemyTarget, damage, 'hpm-note', {
+            baseDamage: damage,
+            skipSound: true,
+            skipReward: true
+          })
+          projectile.destroy()
+          return
+        }
+
+        const allyTarget = this.time.now - Number(projectile.spawnedAt || 0) < 120
+          ? null
+          : this.getAlliedTargets().find((ally) => (
+            Phaser.Geom.Intersects.RectangleToRectangle(projectile.getBounds(), ally.sprite.getBounds())
+          ))
+        if (allyTarget) {
+          const config = this.getHpmConfig()
+          const healAmount = roundToTenth(Number(config.noteHealBase || 6) + this.getHpmExtraLife() * Number(config.noteHealExtraLifeRatio || 0.1))
+          const allyHeal = roundToTenth(Number(config.noteAllyHealBase || 7) + this.getPlayerPunchDamage() * Number(config.noteAllyHealPunchRatio || 0.1))
+          this.healPlayer(healAmount, 'hpm-note-hit', { targetId: allyTarget.id })
+          this.healAllyTarget(allyTarget, allyHeal, 'hpm-note-ally-heal')
+          projectile.destroy()
+        }
+        return
+      }
+
       const target = this.livingEnemies().find((enemyState) => {
         if (!enemyState.sprite?.active || projectile.hitEnemyIds?.has(enemyState.id)) {
           return false
@@ -2288,6 +3061,15 @@ export default class PlayScene extends Scene {
       })
 
       if (target) {
+        if (projectile.projectileKind === 'hpm-summon-laser') {
+          const companion = this.getAlliedCompanions().find((ally) => ally.id === 'hpm-dream-catbug')
+          if (companion) {
+            this.applyCompanionDamageToEnemy(companion, target, Number(projectile.projectileDamage || 0), 'laser')
+          }
+          projectile.destroy()
+          return
+        }
+
         this.applyProjectileDamage(target, projectile)
       }
     })
@@ -2299,14 +3081,15 @@ export default class PlayScene extends Scene {
     }
 
     const config = this.getGabengArrowConfig(enemyState)
+    const target = this.getNearestAllyTarget(enemyState.sprite)
     const now = this.time.now
-    if (!config || now < enemyState.nextArrowCheckAt) {
+    if (!config || now < enemyState.nextArrowCheckAt || !target) {
       return
     }
 
     enemyState.nextArrowCheckAt = now + Number(config.checkIntervalMs || 1000)
 
-    if (this.isPlayerUntargetable()) {
+    if (target.kind === 'player' && this.isPlayerUntargetable()) {
       return
     }
 
@@ -2316,7 +3099,7 @@ export default class PlayScene extends Scene {
     this.recordEvent('gabeng-arrow-lock', {
       enemyId: enemyState.id,
       arrowChance,
-      targetId: this.battleConfig.player.id,
+      targetId: target.id,
       fired: shouldFire
     })
 
@@ -2328,12 +3111,13 @@ export default class PlayScene extends Scene {
   }
 
   spawnEnemyProjectile(enemyState, config) {
-    if (!enemyProjectiles || !config?.textureKey || !player?.active || lifePlayer <= 0) {
+    const target = this.getNearestAllyTarget(enemyState.sprite)
+    if (!enemyProjectiles || !config?.textureKey || !target?.sprite?.active) {
       return
     }
 
-    const deltaX = player.x - enemyState.sprite.x
-    const deltaY = player.y - enemyState.sprite.y
+    const deltaX = target.sprite.x - enemyState.sprite.x
+    const deltaY = target.sprite.y - enemyState.sprite.y
     const magnitude = Math.max(1, Math.hypot(deltaX, deltaY))
     const speed = Number(config.projectileSpeed || 440)
     const velocityX = (deltaX / magnitude) * speed
@@ -2350,7 +3134,7 @@ export default class PlayScene extends Scene {
     projectile.projectileLabel = config.label || '箭矢'
     projectile.projectileStunDurationMs = Number(config.stunDurationMs || 0)
     projectile.ownerEnemyId = enemyState.id
-    projectile.targetId = this.battleConfig.player.id
+    projectile.targetId = target.id
 
     this.recordEvent('gabeng-arrow-fired', {
       enemyId: enemyState.id,
@@ -2370,7 +3154,7 @@ export default class PlayScene extends Scene {
         return
       }
 
-      if (lifePlayer <= 0 || !player?.active) {
+      if (!this.getAlliedTargets().length) {
         projectile.destroy()
         return
       }
@@ -2380,23 +3164,26 @@ export default class PlayScene extends Scene {
         return
       }
 
-      if (!Phaser.Geom.Intersects.RectangleToRectangle(projectile.getBounds(), player.getBounds())) {
+      const target = this.getAlliedTargets().find((ally) => (
+        Phaser.Geom.Intersects.RectangleToRectangle(projectile.getBounds(), ally.sprite.getBounds())
+      ))
+      if (!target) {
         return
       }
 
-      this.applyEnemyProjectileDamage(projectile)
+      this.applyEnemyProjectileDamage(projectile, target)
     })
   }
 
-  applyEnemyProjectileDamage(projectile) {
-    const totalDamage = this.getReducedPlayerDamage(roundToTenth(projectile.projectileDamage || 0))
-    lastDamageTaken = totalDamage
-    lifePlayer = roundToTenth(Math.max(0, lifePlayer - totalDamage))
-    setPlayerValuebar(healthBarPlayer, this.toPercent(lifePlayer, maxLifePlayer))
+  applyEnemyProjectileDamage(projectile, target) {
+    const totalDamage = this.applyDamageToAllyTarget(target, roundToTenth(projectile.projectileDamage || 0), {
+      projectileName: projectile.projectileLabel,
+      enemyId: projectile.ownerEnemyId
+    })
     punchSound.play()
 
     const stunDurationMs = Number(projectile.projectileStunDurationMs || 0)
-    if (stunDurationMs > 0 && lifePlayer > 0) {
+    if (target.kind === 'player' && stunDurationMs > 0 && lifePlayer > 0) {
       this.controlPlayer(stunDurationMs, 0, 0, '箭矢眩晕')
     }
 
@@ -2404,6 +3191,7 @@ export default class PlayScene extends Scene {
       enemyId: projectile.ownerEnemyId,
       projectileName: projectile.projectileLabel,
       totalDamage,
+      targetId: target.id,
       playerLifeAfter: lifePlayer,
       stunDurationMs
     })
@@ -2624,15 +3412,25 @@ export default class PlayScene extends Scene {
     }
   }
 
-  setEnemyScoreCalcTimeout(enemyState, msList, damagePoints, deltaX, deltaY) {
+  setEnemyScoreCalcTimeout(enemyState, initialTarget, msList, damagePoints, deltaX, deltaY) {
     for (const ms of msList) {
       window.setTimeout(() => {
         if (!enemyState.sprite?.active || enemyState.life <= 0 || enemyState.hitPlayer) {
           return
         }
 
-        if (Math.abs(player.x - enemyState.sprite.x) < deltaX && Math.abs(player.y - enemyState.sprite.y) <= deltaY && lifePlayer > 0) {
-          if (this.isPlayerUntargetable()) {
+        const target = (
+          initialTarget?.sprite?.active &&
+          (initialTarget.kind !== 'player' || lifePlayer > 0) &&
+          (initialTarget.kind !== 'companion' || initialTarget.companion?.life > 0)
+        ) ? initialTarget : this.getNearestAllyTarget(enemyState.sprite)
+
+        if (!target?.sprite?.active) {
+          return
+        }
+
+        if (Math.abs(target.sprite.x - enemyState.sprite.x) < deltaX && Math.abs(target.sprite.y - enemyState.sprite.y) <= deltaY) {
+          if (target.kind === 'player' && this.isPlayerUntargetable()) {
             const untargetableState = this.getPlayerUntargetableReason()
             this.recordEvent('damage-blocked', {
               attackType: deltaY > 100 ? 'enemy-kick' : 'enemy-punch',
@@ -2644,21 +3442,28 @@ export default class PlayScene extends Scene {
           }
 
           enemyState.hitPlayer = true
-          const reducedDamage = this.getReducedPlayerDamage(damagePoints)
-          lastDamageTaken = reducedDamage
-          lifePlayer = roundToTenth(Math.max(0, lifePlayer - reducedDamage))
-          setPlayerValuebar(healthBarPlayer, this.toPercent(lifePlayer, maxLifePlayer))
+          const reducedDamage = this.applyDamageToAllyTarget(target, damagePoints, {
+            attackType: deltaY > 100 ? 'enemy-kick' : 'enemy-punch',
+            enemyId: enemyState.id
+          })
           punchSound.play()
           if (this.isGabengEnemy(enemyState)) {
             if (deltaY > 100) {
               const config = this.getGabengArrowConfig(enemyState)
-              const direction = enemyState.sprite.x <= player.x ? 1 : -1
-              this.controlPlayer(
-                Number(config?.kickHitControlMs || 500),
-                direction * Number(config?.kickHitKnockbackX || 210),
-                Number(config?.kickHitKnockbackY || -120),
-                '嘎嘣飞踢击退'
-              )
+              const direction = enemyState.sprite.x <= target.sprite.x ? 1 : -1
+              if (target.kind === 'player') {
+                this.controlPlayer(
+                  Number(config?.kickHitControlMs || 500),
+                  direction * Number(config?.kickHitKnockbackX || 210),
+                  Number(config?.kickHitKnockbackY || -120),
+                  '嘎嘣飞踢击退'
+                )
+              } else if (target.companion?.sprite?.active) {
+                target.companion.sprite.setVelocity(
+                  direction * Number(config?.kickHitKnockbackX || 210),
+                  Number(config?.kickHitKnockbackY || -120)
+                )
+              }
             } else {
               this.adjustGabengArrowChance(
                 enemyState,
@@ -2667,15 +3472,10 @@ export default class PlayScene extends Scene {
               )
             }
           }
-          this.recordEvent('damage-to-player', {
-            attackType: deltaY > 100 ? 'enemy-kick' : 'enemy-punch',
-            enemyId: enemyState.id,
-            baseDamage: damagePoints,
-            totalDamage: reducedDamage,
-            playerLifeAfter: lifePlayer
-          })
-          this.maybeTriggerRetaliatoryStun(enemyState)
-          this.registerJumpRetaliationBoost(enemyState)
+          if (target.kind === 'player') {
+            this.maybeTriggerRetaliatoryStun(enemyState)
+            this.registerJumpRetaliationBoost(enemyState)
+          }
         }
       }, ms)
     }
@@ -2710,6 +3510,32 @@ export default class PlayScene extends Scene {
         totalDamage: finalDamage,
         shieldChargesBeforeHit,
         remainingShieldCharges: playerGarlicShieldCharges
+      })
+    }
+
+    if (this.isHpmPlayer() && Number(this.hpmState.passiveShieldCharges || 0) > 0) {
+      const shieldChargesBeforeHit = this.hpmState.passiveShieldCharges
+      this.hpmState.passiveShieldCharges -= 1
+      finalDamage = Math.max(0.1, roundToTenth(finalDamage * (1 - Number(this.getHpmConfig().passiveLayerShieldReduction || 0.3))))
+      this.recordEvent('damage-reduced', {
+        reason: 'hpm-passive-shield',
+        baseDamage,
+        totalDamage: finalDamage,
+        shieldChargesBeforeHit,
+        remainingShieldCharges: this.hpmState.passiveShieldCharges
+      })
+    }
+
+    if (this.isHpmPlayer() && Number(this.hpmState.auraShieldCharges || 0) > 0) {
+      const shieldChargesBeforeHit = this.hpmState.auraShieldCharges
+      this.hpmState.auraShieldCharges -= 1
+      finalDamage = Math.max(0.1, roundToTenth(finalDamage * (1 - Number(this.getHpmConfig().auraShieldReduction || 0.3))))
+      this.recordEvent('damage-reduced', {
+        reason: 'hpm-aura-shield',
+        baseDamage,
+        totalDamage: finalDamage,
+        shieldChargesBeforeHit,
+        remainingShieldCharges: this.hpmState.auraShieldCharges
       })
     }
 
@@ -2792,8 +3618,13 @@ export default class PlayScene extends Scene {
       return
     }
 
-    const absDeltaX = Math.abs(player.x - enemyState.sprite.x)
-    const verticalGap = Math.abs(player.y - enemyState.sprite.y)
+    const target = this.getNearestAllyTarget(enemyState.sprite)
+    if (!target?.sprite?.active) {
+      return
+    }
+
+    const absDeltaX = Math.abs(target.sprite.x - enemyState.sprite.x)
+    const verticalGap = Math.abs(target.sprite.y - enemyState.sprite.y)
     const now = this.time.now
 
     if (verticalGap > 120) {
@@ -2856,7 +3687,15 @@ export default class PlayScene extends Scene {
     }
 
     this.livingEnemies().forEach((enemyState) => {
-      this.animateFlip(enemyState.sprite, player)
+      const target = this.getNearestAllyTarget(enemyState.sprite)
+      this.animateFlip(enemyState.sprite, target?.sprite || player)
+    })
+
+    this.getAlliedCompanions().forEach((companion) => {
+      const target = this.getNearestEnemies(1, companion.sprite)[0]
+      if (target?.sprite) {
+        this.animateFlip(companion.sprite, target.sprite)
+      }
     })
   }
 
@@ -3213,6 +4052,7 @@ export default class PlayScene extends Scene {
     keyD = this.addInputKey(Phaser.Input.Keyboard.KeyCodes.D)
     keyKick = this.addInputKey(Phaser.Input.Keyboard.KeyCodes.K)
     keyPunch = this.addInputKey(Phaser.Input.Keyboard.KeyCodes.J)
+    keyUltimate = this.addInputKey(Phaser.Input.Keyboard.KeyCodes.L)
     keyESC = this.addInputKey(Phaser.Input.Keyboard.KeyCodes.ESC)
   }
 

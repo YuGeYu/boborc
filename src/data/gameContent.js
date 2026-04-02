@@ -5,6 +5,7 @@ import tankAvatar from '../../ads/b_9a778a55e09c0b2c05a01914cca01f76.jpg'
 import garlicAvatar from '../../ads/garlic.jpg'
 import wudiXiaokeaiAvatar from '../../ads/wudi-xiaokeai.jpg'
 import iq45Avatar from '../../ads/b_b9e7427c2e9f147ff57c19d9147bb4a4.jpg'
+import hpmAvatar from '../../ads/hpm.jpg'
 import gabengAvatar from '@/game/assets/gabeng-face.jpg'
 import yuzijiangAvatar from '@/game/assets/yuzijiang.jpg'
 import yuxingheAvatar from '../../ads/yuxinghe.jpg'
@@ -697,6 +698,105 @@ export const PLAYER_CHARACTERS = [
       jumpVelocity: 660,
       punchDamage: 55,
       kickDamage: 65
+    }
+  },
+  {
+    id: 'hpm',
+    name: 'hpm',
+    title: '生命共鸣型',
+    avatar: hpmAvatar,
+    unlockCost: 1700,
+    passive: '释放 J / K / L 会积攒最多 40 点额外生命。每累计获得 10 点额外生命，会永久保留 1 层“共鸣”：拳击基础伤害 +6、飞踢基础伤害 +8、获得 1 次 30% 减伤护盾，各自最多 4 层；停止释放技能 1 秒后，额外生命会每 0.5 秒衰减 10 点，但已保留的共鸣层数不会消失。',
+    skills: [
+      'J 共鸣拳击：沿用基础拳击判定；对附近非己方单位造成 50 + 15% 当前拳击基础伤害，并造成无硬控击退；自身回复 75 + 10% 额外生命的生命值，仅能回复基础生命；同时将 L 技能剩余冷却缩短 50%，并为附近己方单位回复 20% 额外生命。',
+      'K 保护飞踢：沿用基础飞踢判定；若场上不存在保护圈，则在自身附近展开持续 4 秒的保护圈，圈展开瞬间击退圈内非己方单位；圈内己方单位每秒回复 5% 额外生命，并获得 +7 拳击基础伤害与 +8 飞踢基础伤害。若保护圈已存在，则本次飞踢改为为自己和附近己方单位附加 1 次独立的 30% 减伤护盾，最多 4 次。',
+      'L 梦想猫虫协奏：召唤 1 只 AI“梦想猫虫”持续 25 秒参战，并让自身获得 4 秒 +90 移动速度；随后朝面朝方向依次放出 6 个可反弹音符。音符命中任意单位会使 hpm 回复 6 + 10% 额外生命；命中非己方单位造成 8 + 20% 当前飞踢基础伤害；命中己方单位则回复 7 + 10% 当前拳击基础伤害。'
+    ],
+    abilities: {
+      mode: 'hpm-resonance',
+      ultimateCooldownMs: 25000,
+      hpm: {
+        extraLifeCap: 40,
+        extraLifeDecayDelayMs: 1000,
+        extraLifeDecayStep: 10,
+        extraLifeDecayIntervalMs: 500,
+        passivePunchBonusPerLayer: 6,
+        passiveKickBonusPerLayer: 8,
+        passiveLayerShieldReduction: 0.3,
+        passiveMaxLayers: 4,
+        punchGainExtraLife: 10,
+        kickGainExtraLife: 20,
+        ultimateGainExtraLife: 10,
+        punchDamageBase: 50,
+        punchDamageRatio: 0.15,
+        punchKnockbackX: 280,
+        punchSelfHealBase: 75,
+        punchSelfHealExtraLifeRatio: 0.1,
+        punchAllyHealRatio: 0.2,
+        punchAllyHealRadius: 170,
+        kickRangeBonus: 20,
+        protectionCircleRadius: 155,
+        protectionCircleDurationMs: 4000,
+        protectionCircleTickMs: 1000,
+        protectionCircleKnockbackX: 260,
+        protectionCircleHealRatio: 0.05,
+        protectionCirclePunchBonus: 7,
+        protectionCircleKickBonus: 8,
+        auraShieldReduction: 0.3,
+        auraShieldMaxCharges: 4,
+        auraShieldGrantRadius: 185,
+        ultimateMoveSpeedBonus: 90,
+        ultimateSpeedDurationMs: 4000,
+        noteCount: 6,
+        noteIntervalMs: 120,
+        noteSpeed: 430,
+        noteDamageBase: 8,
+        noteDamageKickRatio: 0.2,
+        noteHealBase: 6,
+        noteHealExtraLifeRatio: 0.1,
+        noteAllyHealBase: 7,
+        noteAllyHealPunchRatio: 0.1,
+        noteDisplayWidth: 24,
+        noteDisplayHeight: 24,
+        summonDurationMs: 12000,
+        summonSpawnOffsetX: 56,
+        summonHealth: 550,
+        summonMoveSpeed: 210,
+        summonJumpVelocity: 660,
+        summonPunchDamage: 55,
+        summonKickDamage: 65,
+        summonPunchCooldownMs: 390,
+        summonKickCooldownMs: 450,
+        summonLaserDamage: 19.3,
+        summonLaserSpeed: 605,
+        summonLaserMaxTravelDistance: 176,
+        summonLaserDisplayWidth: 54,
+        summonLaserDisplayHeight: 18,
+        summonMarkDurationMs: 3000,
+        summonMarkedDamageMultiplier: 2,
+        summonMarkHealRatio: 0.35,
+        summonMarkHealCapRatio: 0.25,
+        summonHealRadius: 169,
+        summonHealAmount: 16.9,
+        summonHealIntervalMs: 480,
+        summonCandyDurationMs: 3900
+      }
+    },
+    details: {
+      moveSpeed: '高',
+      punchMechanic: 'J 共鸣拳击沿用基础拳击动作与判定，近身命中非己方单位时造成 50 + 当前拳击基础伤害 x 15% 的伤害，并附带不打断动作的纯击退。出拳后 hpm 会回复 75 + 额外生命 x 10% 的生命值，这部分回复只能回到基础生命池，溢出直接丢失；同时还会为周围己方单位回复额外生命 x 20% 的生命，并把 L 技能当前剩余冷却时间直接缩短 50%。',
+      kickMechanic: 'K 保护飞踢沿用基础飞踢动作。若场上没有保护圈，则以 hpm 为中心展开半径 155、持续 4 秒的保护圈，出现瞬间会把圈内非己方单位向外击退；圈内己方单位每秒回复额外生命 x 5% 的生命，并获得 +7 拳击基础伤害和 +8 飞踢基础伤害。若保护圈已存在，则本次飞踢不再重复造圈，而是为自己和半径 185 内的己方单位各追加 1 次独立的 30% 减伤护盾，这套护盾与被动护盾分开计算，最多 4 次。',
+      ultimateMechanic: 'L 梦想猫虫协奏冷却 25 秒。施放后会立即召唤 1 只由 AI 控制的己方“梦想猫虫”持续参战 25 秒，并让 hpm 获得 4 秒 +90 移动速度。随后 hpm 朝面朝方向连续放出 6 个音符；每个音符命中任意单位都会让 hpm 回复 6 + 额外生命 x 10% 的生命，命中非己方单位时额外造成 8 + 当前飞踢基础伤害 x 20% 的伤害，命中己方单位时则额外回复 7 + 当前拳击基础伤害 x 10% 的生命。音符碰到墙体与地图边缘不会消失，而是反弹继续飞行。',
+      passiveDetail: 'hpm 的核心资源是“额外生命”，不是实际血量。每次释放 J、K、L 都会获得额外生命，最多累计到 40；每累计拿到 10 点额外生命，就永久保留 1 层共鸣：拳击基础伤害 +6、飞踢基础伤害 +8、增加 1 次 30% 被动减伤护盾，三者各自最多 4 层。停止释放技能 1 秒后，额外生命会每 0.5 秒衰减 10 点，但已经换到手的拳击增伤、飞踢增伤和被动护盾次数不会回退，会一直保留到本局结束。',
+      remarks: '偏向打节奏与战区控制，越能持续施法越容易把数值和保护同时滚起来。',
+      story: 'hpm 把战斗理解成一种“场域共振”。他不急着在第一时间把每一脚都踢到最大，而是先把节奏、保护、续航和队友站位一起推向自己想要的频率。一旦旋律成型，战场上的每次出拳、飞踢和音符反弹，都会开始替他滚出越来越高的收益。'
+    },
+    stats: {
+      health: 650,
+      moveSpeed: 190,
+      jumpVelocity: 610,
+      punchDamage: 65,
+      kickDamage: 75
     }
   },
   {

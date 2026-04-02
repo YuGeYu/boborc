@@ -215,25 +215,29 @@ export default {
           label: '第 2 页',
           items: [
             {
-              title: '被动机制',
-              content: formatMechanic(character.details?.passiveDetail)
+              title: '大招机制',
+              content: formatMechanic(character.details?.ultimateMechanic)
             },
             {
-              title: '战斗定位',
-              content: formatMechanic(character.passive)
+              title: '被动机制',
+              content: formatMechanic(character.details?.passiveDetail)
             }
           ]
         }
       ]
 
-      if (character.details?.story) {
+      if (character.details?.story || character.passive) {
         pages.push({
           id: 'page-3',
           label: '第 3 页',
           items: [
             {
+              title: '战斗定位',
+              content: formatMechanic(character.passive)
+            },
+            {
               title: '角色故事',
-              content: formatMechanic(character.details.story)
+              content: formatMechanic(character.details?.story)
             }
           ]
         })

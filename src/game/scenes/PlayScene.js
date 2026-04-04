@@ -1,5 +1,5 @@
 import Phaser, { Scene } from 'phaser'
-import { normalizeBattleConfigShape } from '@/game/battleConfig'
+import { cloneBattleConfig, normalizeBattleConfigShape } from '@/game/battleConfig'
 import { getCharacterById } from '@/data/gameContent'
 
 const playerWidth = 40
@@ -44,6 +44,29 @@ let playerStatusText
 let playerPersistentDamageReduction
 let playerEquipmentPunchHealCharges
 let playerEquipmentPunchHealRatio
+let playerEquipmentFatalGuardCharges
+let playerEquipmentFatalGuardLife
+let playerEquipmentFatalGuardUntil
+let playerEquipmentBurstUntil
+let playerEquipmentBurstDamageMultiplier
+let playerEquipmentPeriodicHealAmount
+let playerEquipmentPeriodicHealIntervalMs
+let playerEquipmentNextHealAt
+let playerEquipmentLowLifeBurstCharges
+let playerEquipmentLowLifeBurstUntil
+let playerEquipmentLowLifeBurstPunchBonus
+let playerEquipmentLowLifeBurstKickBonus
+let playerEquipmentPunchDamageReduction
+let playerEquipmentKickDamageReduction
+let playerEquipmentDivineStrideCharges
+let playerEquipmentDivineStrideUntil
+let playerEquipmentDivineStrideNullifyChance
+let playerEquipmentLowestAllyHealAmount
+let playerEquipmentLowestAllyHealIntervalMs
+let playerEquipmentNextLowestAllyHealAt
+let playerEquipmentLandingAllySpeedBoostRatio
+let playerEquipmentLandingAllyDefenseReduction
+let playerEquipmentLandingAllyBuffDurationMs
 let playerEquipmentState
 let playerInnateShieldCharges
 let playerInnateShieldReduction
@@ -119,6 +142,9 @@ function createEnemyState(scene, id, x, y, enemyConfig = {}) {
     uiFace: null,
     label: null,
     dreamCatbugMark: null,
+    nextAttackNullified: false,
+    retaliatoryQuakeSlowUntil: 0,
+    retaliatoryQuakeSlowRatio: 0,
     defeatHandled: false
   }
 }
@@ -130,7 +156,9 @@ export default class PlayScene extends Scene {
 
   init(data) {
     this.token = data.token
-    this.battleConfig = normalizeBattleConfigShape(data.battleConfig || this.game.registry.get('battleConfig'))
+    this.battleConfig = normalizeBattleConfigShape(
+      cloneBattleConfig(data.battleConfig || this.game.registry.get('battleConfig'))
+    )
   }
 
   getAllyConfigs() {
@@ -215,6 +243,29 @@ export default class PlayScene extends Scene {
     playerPersistentDamageReduction = 0
     playerEquipmentPunchHealCharges = 0
     playerEquipmentPunchHealRatio = 0
+    playerEquipmentFatalGuardCharges = 0
+    playerEquipmentFatalGuardLife = 1
+    playerEquipmentFatalGuardUntil = 0
+    playerEquipmentBurstUntil = 0
+    playerEquipmentBurstDamageMultiplier = 0
+    playerEquipmentPeriodicHealAmount = 0
+    playerEquipmentPeriodicHealIntervalMs = 0
+    playerEquipmentNextHealAt = 0
+    playerEquipmentLowLifeBurstCharges = 0
+    playerEquipmentLowLifeBurstUntil = 0
+    playerEquipmentLowLifeBurstPunchBonus = 0
+    playerEquipmentLowLifeBurstKickBonus = 0
+    playerEquipmentPunchDamageReduction = 0
+    playerEquipmentKickDamageReduction = 0
+    playerEquipmentDivineStrideCharges = 0
+    playerEquipmentDivineStrideUntil = 0
+    playerEquipmentDivineStrideNullifyChance = 0
+    playerEquipmentLowestAllyHealAmount = 0
+    playerEquipmentLowestAllyHealIntervalMs = 0
+    playerEquipmentNextLowestAllyHealAt = 0
+    playerEquipmentLandingAllySpeedBoostRatio = 0
+    playerEquipmentLandingAllyDefenseReduction = 0
+    playerEquipmentLandingAllyBuffDurationMs = 0
     playerNextPunchAt = 0
     playerNextKickAt = 0
     playerNextUltimateAt = 0
@@ -341,6 +392,14 @@ export default class PlayScene extends Scene {
     return this.time.now < playerInvisibleUntil
   }
 
+  isEquipmentFatalGuardActive() {
+    return this.time.now < playerEquipmentFatalGuardUntil
+  }
+
+  isEquipmentDivineStrideActive() {
+    return this.time.now < playerEquipmentDivineStrideUntil
+  }
+
   isGarlicPlayer() {
     return this.battleConfig?.player?.id === 'garlic'
   }
@@ -428,13 +487,17 @@ export default class PlayScene extends Scene {
   createPlayerEquipmentState() {
     const baseEquipment = this.battleConfig.player.equipment || null
     const evolution = this.battleConfig.player.equipmentEvolution || null
+    const secondEvolution = this.battleConfig.player.equipmentSecondEvolution || null
 
     return {
       baseEquipment,
       evolution,
+      secondEvolution,
       isEvolved: false,
+      isSecondEvolved: false,
       totalDamageDealt: 0,
       threshold: 100,
+      secondThreshold: 500,
       currentBonuses: { ...(baseEquipment?.bonuses || {}) }
     }
   }
@@ -451,6 +514,21 @@ export default class PlayScene extends Scene {
     return Number(this.getCurrentEquipmentBonuses()[key] || 0) - Number(this.getBaseEquipmentBonuses()[key] || 0)
   }
 
+  syncPlayerEquipmentDerivedStats() {
+    const desiredMaxLife = roundToTenth(this.battleConfig.player.stats.health + this.getEquipmentBonusDelta('health'))
+    if (desiredMaxLife === maxLifePlayer) {
+      return
+    }
+
+    const delta = roundToTenth(desiredMaxLife - maxLifePlayer)
+    maxLifePlayer = desiredMaxLife
+    lifePlayer = roundToTenth(Math.max(0, Math.min(maxLifePlayer, lifePlayer + Math.max(0, delta))))
+
+    if (healthBarPlayer) {
+      setPlayerValuebar(healthBarPlayer, this.toPercent(lifePlayer, maxLifePlayer))
+    }
+  }
+
   applyEquipmentBonuses(bonuses, reason = 'equipment-update') {
     playerShieldCharges = Number(playerInnateShieldCharges || 0) + Number(bonuses.shieldCharges || 0)
     this.battleConfig.player.abilities = {
@@ -461,26 +539,97 @@ export default class PlayScene extends Scene {
     playerPersistentDamageReduction = Number(bonuses.persistentDamageReduction || 0)
     playerEquipmentPunchHealCharges = Number(bonuses.punchHealCharges || 0)
     playerEquipmentPunchHealRatio = Number(bonuses.punchHealRatio || 0)
+    playerEquipmentFatalGuardCharges = Number(bonuses.equipmentFatalGuardCharges || 0)
+    playerEquipmentFatalGuardLife = Number(bonuses.equipmentFatalGuardLife || 1)
+    playerEquipmentBurstDamageMultiplier = Number(bonuses.equipmentBurstDamageMultiplier || 0)
+    playerEquipmentPeriodicHealAmount = Number(bonuses.periodicHealAmount || 0)
+    playerEquipmentPeriodicHealIntervalMs = Number(bonuses.periodicHealIntervalMs || 0)
+    playerEquipmentNextHealAt = playerEquipmentPeriodicHealAmount > 0 && playerEquipmentPeriodicHealIntervalMs > 0
+      ? this.time.now + playerEquipmentPeriodicHealIntervalMs
+      : 0
+    playerEquipmentLowLifeBurstCharges = Number(bonuses.lowLifeBurstCharges || 0)
+    playerEquipmentLowLifeBurstPunchBonus = Number(bonuses.lowLifeBurstPunchBonus || 0)
+    playerEquipmentLowLifeBurstKickBonus = Number(bonuses.lowLifeBurstKickBonus || 0)
+    playerEquipmentPunchDamageReduction = Number(bonuses.punchDamageReduction || 0)
+    playerEquipmentKickDamageReduction = Number(bonuses.kickDamageReduction || 0)
+    playerEquipmentDivineStrideCharges = Number(bonuses.divineStrideCharges || 0)
+    playerEquipmentDivineStrideNullifyChance = Number(bonuses.divineStrideNullifyChance || 0)
+    playerEquipmentLowestAllyHealAmount = Number(bonuses.lowestAllyHealAmount || 0)
+    playerEquipmentLowestAllyHealIntervalMs = Number(bonuses.lowestAllyHealIntervalMs || 0)
+    playerEquipmentNextLowestAllyHealAt = playerEquipmentLowestAllyHealAmount > 0 && playerEquipmentLowestAllyHealIntervalMs > 0
+      ? this.time.now + playerEquipmentLowestAllyHealIntervalMs
+      : 0
+    playerEquipmentLandingAllySpeedBoostRatio = Number(bonuses.landingAllySpeedBoostRatio || 0)
+    playerEquipmentLandingAllyDefenseReduction = Number(bonuses.landingAllyDefenseReduction || 0)
+    playerEquipmentLandingAllyBuffDurationMs = Number(bonuses.landingAllyBuffDurationMs || 0)
+    this.syncPlayerEquipmentDerivedStats()
 
-    if (reason !== 'battle-start') {
-      this.recordEvent('装备-效果更新', {
-        reason,
-        shieldCharges: playerShieldCharges,
-        shieldReduction: this.battleConfig.player.abilities?.shieldReduction || 0,
-        persistentDamageReduction: playerPersistentDamageReduction,
-        punchHealCharges: playerEquipmentPunchHealCharges,
-        punchHealRatio: playerEquipmentPunchHealRatio
-      })
-    }
+    this.recordEvent('装备-效果更新', {
+      reason,
+      equipmentName: this.battleConfig.player.equipment?.name || '未装备',
+      equipmentEvolutionName: this.battleConfig.player.equipmentEvolution?.name || null,
+      equipmentSecondEvolutionName: this.battleConfig.player.equipmentSecondEvolution?.name || null,
+      shieldCharges: playerShieldCharges,
+      shieldReduction: this.battleConfig.player.abilities?.shieldReduction || 0,
+      persistentDamageReduction: playerPersistentDamageReduction,
+      maxLifePlayer,
+      equipmentFatalGuardCharges: playerEquipmentFatalGuardCharges,
+      periodicHealAmount: playerEquipmentPeriodicHealAmount,
+      lowLifeBurstCharges: playerEquipmentLowLifeBurstCharges,
+      punchDamageReduction: playerEquipmentPunchDamageReduction,
+      kickDamageReduction: playerEquipmentKickDamageReduction,
+      divineStrideCharges: playerEquipmentDivineStrideCharges,
+      lowestAllyHealAmount: playerEquipmentLowestAllyHealAmount,
+      landingAllySpeedBoostRatio: playerEquipmentLandingAllySpeedBoostRatio,
+      landingAllyDefenseReduction: playerEquipmentLandingAllyDefenseReduction,
+      punchHealCharges: playerEquipmentPunchHealCharges,
+      punchHealRatio: playerEquipmentPunchHealRatio
+    })
+  }
+
+  getBattleSummaryDebugLog(limit = 80) {
+    const normalizedLimit = Math.max(1, Number(limit || 80))
+    const importantTypes = new Set([
+      'battle-start',
+      '装备-效果更新',
+      'equipment-evolved',
+      'equipment-second-evolved'
+    ])
+    const selected = []
+    const seenImportant = new Set()
+
+    battleDebugLog.forEach((entry) => {
+      if (!importantTypes.has(entry.type) || seenImportant.has(entry.type)) {
+        return
+      }
+
+      selected.push(entry)
+      seenImportant.add(entry.type)
+    })
+
+    const tailEntries = battleDebugLog.slice(-normalizedLimit)
+    tailEntries.forEach((entry) => {
+      if (!selected.includes(entry)) {
+        selected.push(entry)
+      }
+    })
+
+    return selected
   }
 
   setUpEquipmentAuraTimer() {
     playerEquipmentAuraTimer = this.time.addEvent({
       delay: 1000,
       loop: true,
-      callback: this.applyPlayerProximityAura,
+      callback: this.runEquipmentTimedEffects,
       callbackScope: this
     })
+  }
+
+  runEquipmentTimedEffects() {
+    this.applyPlayerProximityAura()
+    this.applyEquipmentPeriodicHeal()
+    this.applyLowestAllyPeriodicHeal()
   }
 
   getHostileTargetsNearPlayer(rangeX, rangeY) {
@@ -520,6 +669,65 @@ export default class PlayScene extends Scene {
       repeated.push(nearest[Math.min(index, nearest.length - 1)])
     }
     return repeated
+  }
+
+  getPlayerBasePunchDamage() {
+    return roundToTenth(this.battleConfig.player.stats.punchDamage + this.getEquipmentBonusDelta('punchDamage'))
+  }
+
+  getPlayerBaseKickDamage() {
+    return roundToTenth(this.battleConfig.player.stats.kickDamage + this.getEquipmentBonusDelta('kickDamage'))
+  }
+
+  getEquipmentBurstMultiplier() {
+    return this.time.now < playerEquipmentBurstUntil
+      ? 1 + Number(playerEquipmentBurstDamageMultiplier || 0)
+      : 1
+  }
+
+  maybeTriggerEquipmentLowLifeBurst() {
+    const bonuses = this.getCurrentEquipmentBonuses()
+    const thresholdRatio = Number(bonuses.lowLifeBurstThresholdRatio || 0)
+    const durationMs = Number(bonuses.lowLifeBurstDurationMs || 0)
+    if (playerEquipmentLowLifeBurstCharges <= 0 || thresholdRatio <= 0 || durationMs <= 0 || maxLifePlayer <= 0) {
+      return
+    }
+
+    if (lifePlayer / maxLifePlayer >= thresholdRatio) {
+      return
+    }
+
+    playerEquipmentLowLifeBurstCharges -= 1
+    playerEquipmentLowLifeBurstUntil = this.time.now + durationMs
+    this.recordEvent('equipment-low-life-burst', {
+      remainingCharges: playerEquipmentLowLifeBurstCharges,
+      thresholdRatio,
+      durationMs,
+      punchBonus: playerEquipmentLowLifeBurstPunchBonus,
+      kickBonus: playerEquipmentLowLifeBurstKickBonus
+    })
+  }
+
+  maybeTriggerEquipmentDivineStride() {
+    const bonuses = this.getCurrentEquipmentBonuses()
+    const thresholdRatio = Number(bonuses.divineStrideThresholdRatio || 0)
+    const durationMs = Number(bonuses.divineStrideDurationMs || 0)
+    if (playerEquipmentDivineStrideCharges <= 0 || thresholdRatio <= 0 || durationMs <= 0 || maxLifePlayer <= 0) {
+      return
+    }
+
+    if (lifePlayer / maxLifePlayer >= thresholdRatio) {
+      return
+    }
+
+    playerEquipmentDivineStrideCharges -= 1
+    playerEquipmentDivineStrideUntil = this.time.now + durationMs
+    this.recordEvent('equipment-divine-stride', {
+      remainingCharges: playerEquipmentDivineStrideCharges,
+      thresholdRatio,
+      durationMs,
+      nullifyChance: playerEquipmentDivineStrideNullifyChance
+    })
   }
 
   createHpmState() {
@@ -613,10 +821,27 @@ export default class PlayScene extends Scene {
     }
 
     if (target.kind === 'player') {
-      const reducedDamage = this.getReducedPlayerDamage(totalDamage)
+    const reducedDamage = this.getReducedPlayerDamage(totalDamage, detail.attackType)
       lastDamageTaken = reducedDamage
       lifePlayer = roundToTenth(Math.max(0, lifePlayer - reducedDamage))
       setPlayerValuebar(healthBarPlayer, this.toPercent(lifePlayer, maxLifePlayer))
+      this.maybeTriggerEquipmentLowLifeBurst()
+      this.maybeTriggerEquipmentDivineStride()
+      const reflectRatio = Number(this.getCurrentEquipmentBonuses().damageReflectRatio || 0)
+      if (reducedDamage > 0 && reflectRatio > 0 && detail.enemyId) {
+        const sourceEnemy = this.livingEnemies().find((enemyState) => enemyState.id === detail.enemyId)
+        if (sourceEnemy?.sprite?.active) {
+          const reflectDamage = roundToTenth(reducedDamage * reflectRatio)
+          if (reflectDamage > 0) {
+            this.applyFlatDamageToEnemy(sourceEnemy, reflectDamage, 'equipment-damage-reflect', {
+              baseDamage: reflectDamage,
+              reflectedFrom: detail.enemyId,
+              skipSound: true,
+              skipReward: true
+            })
+          }
+        }
+      }
       this.recordEvent('damage-to-player', {
         targetId: 'player',
         totalDamage: reducedDamage,
@@ -632,6 +857,7 @@ export default class PlayScene extends Scene {
     }
 
     let finalDamage = roundToTenth(totalDamage)
+    finalDamage = Math.max(0, roundToTenth(finalDamage * (1 - this.getActiveAllyDefenseReduction(companion))))
     if (Number(companion.auraShieldCharges || 0) > 0) {
       companion.auraShieldCharges -= 1
       finalDamage = roundToTenth(finalDamage * (1 - Number(this.getHpmConfig().auraShieldReduction || 0.3)))
@@ -656,6 +882,76 @@ export default class PlayScene extends Scene {
     return this.getAlliedTargets(includePlayer).filter((target) => (
       Phaser.Math.Distance.Between(originX, originY, target.sprite.x, target.sprite.y) <= radius
     ))
+  }
+
+  applyLandingAllyBuffs() {
+    if (playerEquipmentLandingAllyBuffDurationMs <= 0) {
+      return
+    }
+
+    const allies = this.getAlliedTargets()
+    const expiresAt = this.time.now + playerEquipmentLandingAllyBuffDurationMs
+    allies.forEach((target) => {
+      if (target.kind === 'player') {
+        player.allySpeedBoostRatio = Math.max(Number(player.allySpeedBoostRatio || 0), playerEquipmentLandingAllySpeedBoostRatio)
+        player.allySpeedBoostUntil = Math.max(Number(player.allySpeedBoostUntil || 0), expiresAt)
+        player.allyDefenseReduction = Math.max(Number(player.allyDefenseReduction || 0), playerEquipmentLandingAllyDefenseReduction)
+        player.allyDefenseUntil = Math.max(Number(player.allyDefenseUntil || 0), expiresAt)
+        return
+      }
+
+      const companion = target.companion
+      if (!companion?.sprite?.active) {
+        return
+      }
+      companion.allySpeedBoostRatio = Math.max(Number(companion.allySpeedBoostRatio || 0), playerEquipmentLandingAllySpeedBoostRatio)
+      companion.allySpeedBoostUntil = Math.max(Number(companion.allySpeedBoostUntil || 0), expiresAt)
+      companion.allyDefenseReduction = Math.max(Number(companion.allyDefenseReduction || 0), playerEquipmentLandingAllyDefenseReduction)
+      companion.allyDefenseUntil = Math.max(Number(companion.allyDefenseUntil || 0), expiresAt)
+    })
+
+    this.recordEvent('equipment-landing-ally-buff', {
+      speedBoostRatio: playerEquipmentLandingAllySpeedBoostRatio,
+      defenseReduction: playerEquipmentLandingAllyDefenseReduction,
+      durationMs: playerEquipmentLandingAllyBuffDurationMs,
+      allyCount: allies.length
+    })
+  }
+
+  getActiveAllySpeedBoostRatio(target) {
+    const boostUntil = Number(target?.allySpeedBoostUntil || 0)
+    return this.time.now < boostUntil ? Number(target?.allySpeedBoostRatio || 0) : 0
+  }
+
+  getActiveAllyDefenseReduction(target) {
+    const defenseUntil = Number(target?.allyDefenseUntil || 0)
+    return this.time.now < defenseUntil ? Number(target?.allyDefenseReduction || 0) : 0
+  }
+
+  getCompanionMoveSpeed(companion) {
+    return roundToTenth(Number(companion?.stats?.moveSpeed || 210) * (1 + this.getActiveAllySpeedBoostRatio(companion)))
+  }
+
+  hasNearbyAllySupport(originSprite, range = 190) {
+    if (!originSprite?.active) {
+      return false
+    }
+
+    return this.getAlliedTargets().some((ally) => (
+      ally.sprite !== originSprite &&
+      Phaser.Math.Distance.Between(originSprite.x, originSprite.y, ally.sprite.x, ally.sprite.y) <= range
+    ))
+  }
+
+  shouldNegateAllyControl(originSprite) {
+    const bonuses = this.getCurrentEquipmentBonuses()
+    const chance = Number(bonuses.allyControlResistChance || 0)
+    const range = Number(bonuses.allyControlResistRange || 0)
+    if (chance <= 0 || range <= 0 || !this.hasNearbyAllySupport(originSprite, range)) {
+      return false
+    }
+
+    return Math.random() < chance
   }
 
   hpmProtectionCircleActive() {
@@ -733,13 +1029,23 @@ export default class PlayScene extends Scene {
 
     const bonuses = this.getCurrentEquipmentBonuses()
     const ratio = Number(bonuses.proximityPulseDamageRatio || 0)
+    const flatDamage = Number(bonuses.proximityPulseFlatDamage || 0)
+    const basePunchRatio = Number(bonuses.proximityPulseBasePunchRatio || 0)
     const rangeX = Number(bonuses.proximityPulseRange || 0)
     const rangeY = Number(bonuses.proximityPulseVerticalRange || 0)
-    if (ratio <= 0 || rangeX <= 0 || rangeY <= 0) {
+    if (ratio <= 0 && flatDamage <= 0 && basePunchRatio <= 0) {
       return
     }
 
-    const pulseDamage = roundToTenth(this.getPlayerPunchDamage() * ratio)
+    if (rangeX <= 0 || rangeY <= 0) {
+      return
+    }
+
+    const pulseDamage = roundToTenth(
+      this.getPlayerPunchDamage() * ratio +
+      flatDamage +
+      this.getPlayerBasePunchDamage() * basePunchRatio
+    )
     if (pulseDamage <= 0) {
       return
     }
@@ -775,6 +1081,161 @@ export default class PlayScene extends Scene {
         skipReward: true
       })
     })
+  }
+
+  applyEquipmentPeriodicHeal() {
+    if (!player?.active || lifePlayer <= 0 || playerEquipmentPeriodicHealAmount <= 0 || playerEquipmentPeriodicHealIntervalMs <= 0) {
+      return
+    }
+
+    if (this.time.now < playerEquipmentNextHealAt) {
+      return
+    }
+
+    playerEquipmentNextHealAt = this.time.now + playerEquipmentPeriodicHealIntervalMs
+    this.healPlayer(playerEquipmentPeriodicHealAmount, 'equipment-periodic-heal', {
+      healAmount: playerEquipmentPeriodicHealAmount,
+      intervalMs: playerEquipmentPeriodicHealIntervalMs
+    })
+  }
+
+  applyLowestAllyPeriodicHeal() {
+    if (playerEquipmentLowestAllyHealAmount <= 0 || playerEquipmentLowestAllyHealIntervalMs <= 0 || lifePlayer <= 0) {
+      return
+    }
+
+    if (this.time.now < playerEquipmentNextLowestAllyHealAt) {
+      return
+    }
+
+    playerEquipmentNextLowestAllyHealAt = this.time.now + playerEquipmentLowestAllyHealIntervalMs
+    const allies = this.getAlliedTargets()
+    if (!allies.length) {
+      return
+    }
+
+    const target = allies
+      .slice()
+      .sort((a, b) => {
+        const aLife = a.kind === 'player' ? lifePlayer : Number(a.companion?.life || 0)
+        const bLife = b.kind === 'player' ? lifePlayer : Number(b.companion?.life || 0)
+        const aMax = a.kind === 'player' ? maxLifePlayer : Number(a.companion?.maxLife || 1)
+        const bMax = b.kind === 'player' ? maxLifePlayer : Number(b.companion?.maxLife || 1)
+        return (aLife / Math.max(1, aMax)) - (bLife / Math.max(1, bMax))
+      })[0]
+
+    this.healAllyTarget(target, playerEquipmentLowestAllyHealAmount, 'equipment-lowest-ally-heal')
+  }
+
+  applyRetaliatoryQuakeSlow(target, slowRatio, durationMs) {
+    if (!target?.sprite?.active || slowRatio <= 0 || durationMs <= 0) {
+      return
+    }
+
+    target.retaliatoryQuakeSlowRatio = Math.max(Number(target.retaliatoryQuakeSlowRatio || 0), slowRatio)
+    target.retaliatoryQuakeSlowUntil = Math.max(Number(target.retaliatoryQuakeSlowUntil || 0), this.time.now + durationMs)
+  }
+
+  triggerRetaliatoryQuakeAroundEnemy(originEnemy, triggerType = 'hit') {
+    const bonuses = this.getCurrentEquipmentBonuses()
+    const damageRatio = Number(bonuses.retaliatoryQuakeDamageRatio || 0)
+    const slowRatio = Number(bonuses.retaliatoryQuakeSlowRatio || 0)
+    const durationMs = Number(bonuses.retaliatoryQuakeSlowDurationMs || 0)
+    const rangeX = Number(bonuses.retaliatoryQuakeRange || 0)
+    const rangeY = Number(bonuses.retaliatoryQuakeVerticalRange || 0)
+    if (!originEnemy?.sprite?.active || damageRatio <= 0 || rangeX <= 0 || rangeY <= 0) {
+      return
+    }
+
+    const damage = roundToTenth(this.getPlayerBaseKickDamage() * damageRatio)
+    const targets = this.getHostileTargetsNearEnemy(originEnemy, rangeX, rangeY)
+    let connectedCount = 0
+
+    targets.forEach((enemyState) => {
+      const connected = this.applyFlatDamageToEnemy(enemyState, damage, 'equipment-retaliatory-quake', {
+        baseDamage: damage,
+        splashFrom: originEnemy.id,
+        skipSound: true,
+        skipReward: true
+      })
+      if (!connected) {
+        return
+      }
+
+      connectedCount += 1
+      this.applyRetaliatoryQuakeSlow(enemyState, slowRatio, durationMs)
+    })
+
+    if (connectedCount > 0 || slowRatio > 0) {
+      this.recordEvent('equipment-retaliatory-quake', {
+        triggerType,
+        splashFrom: originEnemy.id,
+        totalDamage: damage,
+        slowRatio,
+        slowDurationMs: durationMs,
+        hitTargets: targets.map((enemyState) => enemyState.id)
+      })
+    }
+  }
+
+  maybeApplyEquipmentHitSlow(target, triggerType) {
+    const bonuses = this.getCurrentEquipmentBonuses()
+    const slowChance = Number(bonuses.hitSlowChance || 0)
+    const slowRatio = Number(bonuses.hitSlowRatio || 0)
+    const durationMs = Number(bonuses.hitSlowDurationMs || 0)
+    if (!target?.sprite?.active || slowChance <= 0 || slowRatio <= 0 || durationMs <= 0) {
+      return
+    }
+
+    if (Math.random() >= slowChance) {
+      return
+    }
+
+    this.applyRetaliatoryQuakeSlow(target, slowRatio, durationMs)
+    this.recordEvent('equipment-hit-slow', {
+      triggerType,
+      enemyId: target.id,
+      slowRatio,
+      slowDurationMs: durationMs
+    })
+  }
+
+  maybeApplyEquipmentNullify(target, triggerType) {
+    const bonuses = this.getCurrentEquipmentBonuses()
+    const chance = Number(bonuses.nullifyNextHitChance || 0)
+    if (!target?.sprite?.active || chance <= 0) {
+      return
+    }
+
+    if (Math.random() >= chance) {
+      return
+    }
+
+    target.nextAttackNullified = true
+    this.recordEvent('equipment-hit-nullify', {
+      triggerType,
+      enemyId: target.id,
+      chance
+    })
+  }
+
+  handleEquipmentOffensiveHit(target, attackType, totalDamage) {
+    if (!target?.sprite?.active || totalDamage <= 0) {
+      return
+    }
+
+    const bonuses = this.getCurrentEquipmentBonuses()
+    const lifestealRatio = Number(bonuses.lifestealOnHitRatio || 0)
+    if (lifestealRatio > 0) {
+      this.healPlayer(roundToTenth(totalDamage * lifestealRatio), 'equipment-lifesteal', {
+        attackType,
+        enemyId: target.id,
+        lifestealRatio
+      })
+    }
+
+    this.maybeApplyEquipmentHitSlow(target, attackType)
+    this.maybeApplyEquipmentNullify(target, attackType)
   }
 
   maybeTriggerRetaliatoryStun(enemyState) {
@@ -816,18 +1277,25 @@ export default class PlayScene extends Scene {
   applyLandingShockwave(jumpHeight) {
     const bonuses = this.getCurrentEquipmentBonuses()
     const ratio = Number(bonuses.landingShockwaveHeightRatio || 0)
+    const impactBaseDamage = Number(bonuses.landingImpactBaseDamage || 0)
+    const impactRatio = Number(bonuses.landingImpactHeightRatio || 0)
+    const resolvedRatio = ratio > 0 ? ratio : impactRatio
     const rangeX = Number(bonuses.landingShockwaveRange || 0)
     const rangeY = Number(bonuses.landingShockwaveVerticalRange || 0)
-    if (ratio <= 0 || rangeX <= 0 || rangeY <= 0 || jumpHeight <= 0) {
+    const impactRangeX = Number(bonuses.landingImpactRange || rangeX || 0)
+    const impactRangeY = Number(bonuses.landingImpactVerticalRange || rangeY || 0)
+    const resolvedRangeX = impactRangeX > 0 ? impactRangeX : rangeX
+    const resolvedRangeY = impactRangeY > 0 ? impactRangeY : rangeY
+    if (resolvedRatio <= 0 || resolvedRangeX <= 0 || resolvedRangeY <= 0 || jumpHeight <= 0) {
       return
     }
 
-    const damage = roundToTenth(jumpHeight * ratio)
+    const damage = roundToTenth(impactBaseDamage + jumpHeight * resolvedRatio)
     if (damage <= 0) {
       return
     }
 
-    const targets = this.getHostileTargetsNearPlayer(rangeX, rangeY)
+    const targets = this.getHostileTargetsNearPlayer(resolvedRangeX, resolvedRangeY)
     targets.forEach((enemyState) => {
       this.applyFlatDamageToEnemy(enemyState, damage, 'equipment-landing-shockwave', {
         baseDamage: damage,
@@ -835,6 +1303,8 @@ export default class PlayScene extends Scene {
         skipSound: true
       })
     })
+
+    this.applyLandingAllyBuffs()
 
     this.recordEvent('equipment-landing-shockwave', {
       jumpHeight: roundToTenth(jumpHeight),
@@ -872,6 +1342,37 @@ export default class PlayScene extends Scene {
   }
 
   maybeTriggerEquipmentEvolution() {
+    if (!playerEquipmentState) {
+      return
+    }
+
+    if (!playerEquipmentState.isEvolved && playerEquipmentState.evolution && playerEquipmentState.totalDamageDealt > playerEquipmentState.threshold) {
+      playerEquipmentState.isEvolved = true
+      playerEquipmentState.currentBonuses = { ...(playerEquipmentState.evolution.bonuses || {}) }
+      this.applyEquipmentBonuses(playerEquipmentState.currentBonuses, 'equipment-evolved')
+      this.recordEvent('equipment-evolved', {
+        stage: 1,
+        threshold: playerEquipmentState.threshold,
+        totalDamageDealt: roundToTenth(playerEquipmentState.totalDamageDealt),
+        from: playerEquipmentState.baseEquipment?.name || '未装备',
+        to: playerEquipmentState.evolution.name
+      })
+    }
+
+    if (!playerEquipmentState.isSecondEvolved && playerEquipmentState.secondEvolution && playerEquipmentState.totalDamageDealt > playerEquipmentState.secondThreshold) {
+      playerEquipmentState.isSecondEvolved = true
+      playerEquipmentState.currentBonuses = { ...(playerEquipmentState.secondEvolution.bonuses || {}) }
+      this.applyEquipmentBonuses(playerEquipmentState.currentBonuses, 'equipment-second-evolved')
+      this.recordEvent('equipment-second-evolved', {
+        stage: 2,
+        threshold: playerEquipmentState.secondThreshold,
+        totalDamageDealt: roundToTenth(playerEquipmentState.totalDamageDealt),
+        from: playerEquipmentState.evolution?.name || playerEquipmentState.baseEquipment?.name || '未装备',
+        to: playerEquipmentState.secondEvolution.name
+      })
+    }
+
+    return
     if (!playerEquipmentState || playerEquipmentState.isEvolved || !playerEquipmentState.evolution) {
       return
     }
@@ -921,7 +1422,7 @@ export default class PlayScene extends Scene {
   }
 
   isPlayerUntargetable() {
-    return this.isPlayerInvisible() || this.isGarlicTrueForm() || this.isGarlicTransitioning() || this.isWudiDeathDanceActive()
+    return this.isPlayerInvisible() || this.isEquipmentFatalGuardActive() || this.isGarlicTrueForm() || this.isGarlicTransitioning() || this.isWudiDeathDanceActive()
   }
 
   getPlayerUntargetableReason() {
@@ -929,6 +1430,20 @@ export default class PlayScene extends Scene {
       return {
         reason: '亡崩死裂',
         remainingMs: Math.max(0, playerWudiDeathDanceUntil - this.time.now)
+      }
+    }
+
+    if (this.isEquipmentFatalGuardActive()) {
+      return {
+        reason: 'equipment-fatal-guard',
+        remainingMs: Math.max(0, playerEquipmentFatalGuardUntil - this.time.now)
+      }
+    }
+
+    if (this.isEquipmentDivineStrideActive()) {
+      return {
+        reason: 'equipment-divine-stride',
+        remainingMs: Math.max(0, playerEquipmentDivineStrideUntil - this.time.now)
       }
     }
 
@@ -950,14 +1465,15 @@ export default class PlayScene extends Scene {
   getPlayerMoveSpeed() {
     const baseSpeed = this.battleConfig.player.stats.moveSpeed
     const equipmentSpeedDelta = this.getEquipmentBonusDelta('moveSpeed')
+    const allySpeedBoost = this.getActiveAllySpeedBoostRatio(player)
     const hpmBonus = this.isHpmPlayer() && this.time.now < this.hpmState.speedBoostUntil
       ? Number(this.getHpmConfig().ultimateMoveSpeedBonus || 90)
       : 0
     if (!this.isGarlicTrueForm()) {
-      return baseSpeed + equipmentSpeedDelta + hpmBonus
+      return roundToTenth((baseSpeed + equipmentSpeedDelta + hpmBonus) * (1 + allySpeedBoost))
     }
 
-    return baseSpeed + equipmentSpeedDelta + hpmBonus + (this.getGarlicConfig().trueFormMoveSpeedBonus || 0)
+    return roundToTenth((baseSpeed + equipmentSpeedDelta + hpmBonus + (this.getGarlicConfig().trueFormMoveSpeedBonus || 0)) * (1 + allySpeedBoost))
   }
 
   getDreamCatbugMarkState(target) {
@@ -991,6 +1507,14 @@ export default class PlayScene extends Scene {
     }
 
     return 0
+  }
+
+  getRetaliatoryQuakeSlowMultiplier(target) {
+    if (!target || this.time.now >= Number(target.retaliatoryQuakeSlowUntil || 0)) {
+      return 1
+    }
+
+    return Math.max(0, 1 - Number(target.retaliatoryQuakeSlowRatio || 0))
   }
 
   applyDreamCatbugMarkFromHit(target, totalDamage, attackType) {
@@ -1055,38 +1579,29 @@ export default class PlayScene extends Scene {
   }
 
   updateDreamCatbugState() {
-    if (!this.isDreamCatbugPlayer()) {
-      return
-    }
-
     this.enemies.forEach((enemyState) => {
-      const markState = this.getDreamCatbugMarkState(enemyState)
-      if (!markState) {
-        if (enemyState.sprite?.active && enemyState.sprite.isTinted) {
-          enemyState.sprite.clearTint()
-        }
-        return
-      }
-
-      if (this.time.now >= markState.expiresAt) {
-        this.resolveDreamCatbugMark(enemyState, enemyState.life <= 0 ? 'expired-after-defeat' : 'expired')
-        if (enemyState.sprite?.active && enemyState.sprite.isTinted) {
-          enemyState.sprite.clearTint()
-        }
-        return
-      }
-
       if (!enemyState.sprite?.active) {
         return
       }
 
-      const slowMultiplier = this.getDreamCatbugSlowMultiplier(enemyState)
-      if (slowMultiplier <= 0) {
-        enemyState.sprite.setTint(0xf8d66d)
-      } else if (slowMultiplier <= 0.5) {
-        enemyState.sprite.setTint(0xf09cf4)
-      } else {
-        enemyState.sprite.setTint(0x8dd6ff)
+      const markState = this.getDreamCatbugMarkState(enemyState)
+      if (markState && this.time.now >= markState.expiresAt) {
+        this.resolveDreamCatbugMark(enemyState, enemyState.life <= 0 ? 'expired-after-defeat' : 'expired')
+      }
+
+      if (this.isDreamCatbugPlayer() && enemyState.dreamCatbugMark) {
+        const slowMultiplier = this.getDreamCatbugSlowMultiplier(enemyState)
+        if (slowMultiplier <= 0) {
+          enemyState.sprite.setTint(0xf8d66d)
+        } else if (slowMultiplier <= 0.5) {
+          enemyState.sprite.setTint(0xf09cf4)
+        } else {
+          enemyState.sprite.setTint(0x8dd6ff)
+        }
+      } else if (this.getRetaliatoryQuakeSlowMultiplier(enemyState) < 1) {
+        enemyState.sprite.setTint(0x7fd6ff)
+      } else if (enemyState.sprite.isTinted) {
+        enemyState.sprite.clearTint()
       }
     })
 
@@ -1188,7 +1703,7 @@ export default class PlayScene extends Scene {
 
   getEnemyMoveSpeed(enemyState) {
     const baseSpeed = Number(enemyState?.stats?.moveSpeed || this.battleConfig.enemy.stats.moveSpeed || 0)
-    return roundToTenth(baseSpeed * this.getDreamCatbugSlowMultiplier(enemyState))
+    return roundToTenth(baseSpeed * this.getDreamCatbugSlowMultiplier(enemyState) * this.getRetaliatoryQuakeSlowMultiplier(enemyState))
   }
 
   getPlayerJumpHeightEstimate() {
@@ -1773,6 +2288,14 @@ export default class PlayScene extends Scene {
 
   controlPlayer(durationMs, knockbackX = 0, knockbackY = 0, reason = '受控') {
     if (!player?.active || lifePlayer <= 0) {
+      return
+    }
+
+    if (this.shouldNegateAllyControl(player)) {
+      this.recordEvent('equipment-ally-control-resist', {
+        targetId: 'player',
+        reason
+      })
       return
     }
 
@@ -2447,7 +2970,7 @@ export default class PlayScene extends Scene {
       if (this.time.now < Number(companion.actionLockUntil || 0) || this.time.now < Number(companion.nextDecisionAt || 0)) {
         this.doAnim(companion.sprite, absDeltaX > 74 ? 'walk2' : 'idle2')
         if (absDeltaX > 74) {
-          companion.sprite.setVelocityX(direction * Number(companion.stats.moveSpeed || 210))
+          companion.sprite.setVelocityX(direction * this.getCompanionMoveSpeed(companion))
         } else {
           companion.sprite.setVelocityX(0)
         }
@@ -2497,7 +3020,7 @@ export default class PlayScene extends Scene {
 
       if (absDeltaX > 74) {
         this.doAnim(companion.sprite, 'walk2')
-        companion.sprite.setVelocityX(direction * Number(companion.stats.moveSpeed || 210))
+        companion.sprite.setVelocityX(direction * this.getCompanionMoveSpeed(companion))
       } else {
         this.doAnim(companion.sprite, 'idle2')
         companion.sprite.setVelocityX(0)
@@ -2882,30 +3405,40 @@ export default class PlayScene extends Scene {
     if (this.isHpmPlayer()) {
       const config = this.getHpmConfig()
       const circleBonus = this.getHpmProtectionBonuses().punchBonus
-      return roundToTenth(
+      return roundToTenth(roundToTenth(
         this.battleConfig.player.stats.punchDamage +
         equipmentDamageDelta +
         Number(config.passivePunchBonusPerLayer || 6) * Number(this.hpmState.passivePunchLayers || 0) +
+        (this.time.now < playerEquipmentLowLifeBurstUntil ? playerEquipmentLowLifeBurstPunchBonus : 0) +
         circleBonus
-      )
+      ) * this.getEquipmentBurstMultiplier())
     }
 
-    return roundToTenth(this.battleConfig.player.stats.punchDamage + equipmentDamageDelta)
+    return roundToTenth(roundToTenth(
+      this.battleConfig.player.stats.punchDamage +
+      equipmentDamageDelta +
+      (this.time.now < playerEquipmentLowLifeBurstUntil ? playerEquipmentLowLifeBurstPunchBonus : 0)
+    ) * this.getEquipmentBurstMultiplier())
   }
 
   getPlayerKickDamage() {
     if (this.isHpmPlayer()) {
       const config = this.getHpmConfig()
       const circleBonus = this.getHpmProtectionBonuses().kickBonus
-      return roundToTenth(
+      return roundToTenth(roundToTenth(
         this.battleConfig.player.stats.kickDamage +
         this.getEquipmentBonusDelta('kickDamage') +
         Number(config.passiveKickBonusPerLayer || 8) * Number(this.hpmState.passiveKickLayers || 0) +
+        (this.time.now < playerEquipmentLowLifeBurstUntil ? playerEquipmentLowLifeBurstKickBonus : 0) +
         circleBonus
-      )
+      ) * this.getEquipmentBurstMultiplier())
     }
 
-    return roundToTenth(this.battleConfig.player.stats.kickDamage + this.getEquipmentBonusDelta('kickDamage'))
+    return roundToTenth(roundToTenth(
+      this.battleConfig.player.stats.kickDamage +
+      this.getEquipmentBonusDelta('kickDamage') +
+      (this.time.now < playerEquipmentLowLifeBurstUntil ? playerEquipmentLowLifeBurstKickBonus : 0)
+    ) * this.getEquipmentBurstMultiplier())
   }
 
   getPlayerKickRangeBonus() {
@@ -3226,6 +3759,7 @@ export default class PlayScene extends Scene {
     }
 
     if (attackType === 'punch') {
+      this.handleEquipmentOffensiveHit(target, attackType, totalDamage)
       if (this.isIQ45Player()) {
         this.addIQ45KickEnergy(Number(this.getIQ45Config().extendedKickEnergyPerPunchHit || 50), 'punch-hit')
       }
@@ -3238,7 +3772,9 @@ export default class PlayScene extends Scene {
     }
 
     if (attackType === 'kick') {
+      this.handleEquipmentOffensiveHit(target, attackType, totalDamage)
       this.triggerKickSplashFromHit(target, totalDamage)
+      this.triggerRetaliatoryQuakeAroundEnemy(target, 'kick-hit')
       this.triggerPlayerKickFollowUps(baseDamage, target.id)
     }
 
@@ -3441,9 +3977,20 @@ export default class PlayScene extends Scene {
             return
           }
 
+          const attackType = deltaY > 100 ? 'enemy-kick' : 'enemy-punch'
+          let resolvedDamage = damagePoints
+          if (enemyState.nextAttackNullified) {
+            enemyState.nextAttackNullified = false
+            resolvedDamage = 0
+            this.recordEvent('equipment-nullify-consumed', {
+              attackType,
+              enemyId: enemyState.id
+            })
+          }
+
           enemyState.hitPlayer = true
-          const reducedDamage = this.applyDamageToAllyTarget(target, damagePoints, {
-            attackType: deltaY > 100 ? 'enemy-kick' : 'enemy-punch',
+          const reducedDamage = this.applyDamageToAllyTarget(target, resolvedDamage, {
+            attackType,
             enemyId: enemyState.id
           })
           punchSound.play()
@@ -3459,10 +4006,17 @@ export default class PlayScene extends Scene {
                   '嘎嘣飞踢击退'
                 )
               } else if (target.companion?.sprite?.active) {
-                target.companion.sprite.setVelocity(
-                  direction * Number(config?.kickHitKnockbackX || 210),
-                  Number(config?.kickHitKnockbackY || -120)
-                )
+                if (this.shouldNegateAllyControl(target.companion.sprite)) {
+                  this.recordEvent('equipment-ally-control-resist', {
+                    targetId: target.companion.id,
+                    reason: 'gabeng-kick-control'
+                  })
+                } else {
+                  target.companion.sprite.setVelocity(
+                    direction * Number(config?.kickHitKnockbackX || 210),
+                    Number(config?.kickHitKnockbackY || -120)
+                  )
+                }
               }
             } else {
               this.adjustGabengArrowChance(
@@ -3473,6 +4027,7 @@ export default class PlayScene extends Scene {
             }
           }
           if (target.kind === 'player') {
+            this.triggerRetaliatoryQuakeAroundEnemy(enemyState, 'damage-taken')
             this.maybeTriggerRetaliatoryStun(enemyState)
             this.registerJumpRetaliationBoost(enemyState)
           }
@@ -3481,9 +4036,51 @@ export default class PlayScene extends Scene {
     }
   }
 
-  getReducedPlayerDamage(baseDamage) {
+  getReducedPlayerDamage(baseDamage, attackType = '') {
     const abilities = this.battleConfig.player.abilities || {}
     let finalDamage = roundToTenth(baseDamage)
+
+    if (this.isEquipmentDivineStrideActive() && Math.random() < playerEquipmentDivineStrideNullifyChance) {
+      this.recordEvent('equipment-divine-stride-evade', {
+        attackType,
+        nullifyChance: playerEquipmentDivineStrideNullifyChance
+      })
+      return 0
+    }
+
+    const allyDefenseReduction = this.getActiveAllyDefenseReduction(player)
+    if (allyDefenseReduction > 0) {
+      finalDamage = Math.max(0, roundToTenth(finalDamage * (1 - allyDefenseReduction)))
+      this.recordEvent('damage-reduced', {
+        reason: 'equipment-ally-defense',
+        attackType,
+        baseDamage,
+        totalDamage: finalDamage,
+        reduction: allyDefenseReduction
+      })
+    }
+
+    if (String(attackType).includes('punch') && playerEquipmentPunchDamageReduction > 0) {
+      finalDamage = Math.max(0, roundToTenth(finalDamage * (1 - playerEquipmentPunchDamageReduction)))
+      this.recordEvent('damage-reduced', {
+        reason: 'equipment-punch-reduction',
+        attackType,
+        baseDamage,
+        totalDamage: finalDamage,
+        reduction: playerEquipmentPunchDamageReduction
+      })
+    }
+
+    if (String(attackType).includes('kick') && playerEquipmentKickDamageReduction > 0) {
+      finalDamage = Math.max(0, roundToTenth(finalDamage * (1 - playerEquipmentKickDamageReduction)))
+      this.recordEvent('damage-reduced', {
+        reason: 'equipment-kick-reduction',
+        attackType,
+        baseDamage,
+        totalDamage: finalDamage,
+        reduction: playerEquipmentKickDamageReduction
+      })
+    }
 
     if (this.isIQ45StoneActive()) {
       const healAmount = roundToTenth(finalDamage * Number(this.getIQ45Config().stoneHealRatio || 0.1))
@@ -3587,6 +4184,22 @@ export default class PlayScene extends Scene {
         fatalGuardCharges: playerFatalGuardCharges
       })
       return Math.max(0, roundToTenth(lifePlayer - (abilities.fatalGuardLife || 1)))
+    }
+
+    if (playerEquipmentFatalGuardCharges > 0 && finalDamage >= lifePlayer) {
+      playerEquipmentFatalGuardCharges -= 1
+      playerEquipmentFatalGuardUntil = this.time.now + Number(this.getCurrentEquipmentBonuses().equipmentFatalGuardInvincibleMs || 500)
+      playerEquipmentBurstUntil = this.time.now + Number(this.getCurrentEquipmentBonuses().equipmentBurstDurationMs || 1000)
+      lifePlayer = Math.max(1, playerEquipmentFatalGuardLife || 1)
+      setPlayerValuebar(healthBarPlayer, this.toPercent(lifePlayer, maxLifePlayer))
+      this.recordEvent('equipment-fatal-guard-triggered', {
+        baseDamage,
+        totalDamage: 0,
+        remainingCharges: playerEquipmentFatalGuardCharges,
+        invincibleMs: Math.max(0, playerEquipmentFatalGuardUntil - this.time.now),
+        burstMs: Math.max(0, playerEquipmentBurstUntil - this.time.now)
+      })
+      return 0
     }
 
     if (this.isGarlicPlayer() && !this.isGarlicSecondFakeForm() && finalDamage >= lifePlayer) {
@@ -4114,7 +4727,7 @@ export default class PlayScene extends Scene {
         id: enemyState.id,
         life: enemyState.life
       })),
-      debugLog: battleDebugLog.slice(-80)
+      debugLog: this.getBattleSummaryDebugLog(80)
     }
   }
 

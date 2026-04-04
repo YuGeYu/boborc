@@ -5,6 +5,7 @@ import WinScene from '@/game/scenes/WinScene'
 import PauseScene from '@/game/scenes/PauseScene'
 import LoseScene from '@/game/scenes/LoseScene'
 import SuperCabboUnlockScene from '@/game/scenes/SuperCabboUnlockScene'
+import { cloneBattleConfig } from '@/game/battleConfig'
 
 function canUseWebGL() {
   try {
@@ -52,18 +53,20 @@ function createGame(containerId, battleConfig, rendererType) {
 function launch(containerId, battleConfig, onBattleEnd = () => {}, onBattleRestart = () => {}) {
   const rendererType = resolveRendererType()
   let game
+  const battleConfigSnapshot = cloneBattleConfig(battleConfig)
 
   try {
-    game = createGame(containerId, battleConfig, rendererType)
+    game = createGame(containerId, battleConfigSnapshot, rendererType)
   } catch (error) {
     if (rendererType === Phaser.CANVAS) {
       throw error
     }
 
-    game = createGame(containerId, battleConfig, Phaser.CANVAS)
+    game = createGame(containerId, battleConfigSnapshot, Phaser.CANVAS)
   }
 
-  game.registry.set('battleConfig', battleConfig)
+  game.registry.set('battleConfig', cloneBattleConfig(battleConfigSnapshot))
+  game.registry.set('initialBattleConfig', cloneBattleConfig(battleConfigSnapshot))
   game.events.on('battle-complete', onBattleEnd)
   game.events.on('battle-restart', onBattleRestart)
 

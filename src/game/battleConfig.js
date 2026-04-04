@@ -16,6 +16,14 @@ function cloneBattleActor(actor) {
   }
 }
 
+export function cloneBattleConfig(config) {
+  if (!config) {
+    return null
+  }
+
+  return JSON.parse(JSON.stringify(config))
+}
+
 export function createBattleActor({ actor, team, controlMode = 'ai', slot = 0, isPrimary = false }) {
   return {
     ...cloneBattleActor(actor),

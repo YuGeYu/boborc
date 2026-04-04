@@ -90,7 +90,29 @@ export const UNEQUIPPED_EVOLUTION_OPTIONS = [
       proximityPulseDamageRatio: 0.1,
       proximityPulseRange: 110,
       proximityPulseVerticalRange: 130
-    }
+    },
+    secondEvolutionPaths: [
+      {
+        id: 'ember-pulse-core',
+        name: '灼心脉核',
+        description: '第 2 次进化后，角色最大生命 +45；并且每秒会对身边左右 128、上下 138 范围内的敌人造成 6 + 10% 角色基础拳击伤害的脉冲伤害。',
+        bonuses: {
+          health: 45,
+          proximityPulseFlatDamage: 6,
+          proximityPulseBasePunchRatio: 0.1,
+          proximityPulseRange: 128,
+          proximityPulseVerticalRange: 138
+        }
+      },
+      {
+        id: 'sentinel-heart-ring',
+        name: '卫心命环',
+        description: '第 2 次进化后，角色最大生命 +72。',
+        bonuses: {
+          health: 72
+        }
+      }
+    ]
   },
   {
     id: 'shockwave-greaves',
@@ -100,7 +122,22 @@ export const UNEQUIPPED_EVOLUTION_OPTIONS = [
       kickSplashDamageRatio: 0.1,
       kickSplashRange: 120,
       kickSplashVerticalRange: 120
-    }
+    },
+    secondEvolutionPaths: [
+      {
+        id: 'rift-quake-greaves',
+        name: '裂域震靴',
+        description: '第 2 次进化后，角色获得 12% 常驻减伤；并且在受到伤害或飞踢命中首个非己方单位时，会对目标周围左右 132、上下 126 范围内的非己方单位造成 15% 飞踢基础伤害，并附加持续 3 秒的 15% 减速。',
+        bonuses: {
+          persistentDamageReduction: 0.12,
+          retaliatoryQuakeDamageRatio: 0.15,
+          retaliatoryQuakeSlowRatio: 0.15,
+          retaliatoryQuakeSlowDurationMs: 3000,
+          retaliatoryQuakeRange: 132,
+          retaliatoryQuakeVerticalRange: 126
+        }
+      }
+    ]
   }
 ]
 export const EQUIPMENT_OPTIONS = [
@@ -121,7 +158,31 @@ export const EQUIPMENT_OPTIONS = [
         bonuses: {
           punchDamage: 4,
           kickDamage: 4
-        }
+        },
+        secondEvolutionPaths: [
+          {
+            id: 'tianzhu-breaking-edge',
+            name: '天诛破锋',
+            description: '第 2 次进化后，基础拳击伤害和基础飞踢伤害各增加 80 点。',
+            bonuses: {
+              punchDamage: 80,
+              kickDamage: 80
+            }
+          },
+          {
+            id: 'bloodguard-warblade',
+            name: '血守战刃',
+            description: '第 2 次进化后，基础拳击伤害和基础飞踢伤害各增加 30 点，最大生命 +30；拳击和飞踢命中非己方单位时，有 30% 概率造成该目标 20% 移动减速，持续 1 秒。',
+            bonuses: {
+              punchDamage: 30,
+              kickDamage: 30,
+              health: 30,
+              hitSlowChance: 0.3,
+              hitSlowRatio: 0.2,
+              hitSlowDurationMs: 1000
+            }
+          }
+        ]
       },
       {
         id: 'liuguang-blade',
@@ -132,7 +193,32 @@ export const EQUIPMENT_OPTIONS = [
           kickDamage: 2,
           punchHealCharges: 1,
           punchHealRatio: 0.3
-        }
+        },
+        secondEvolutionPaths: [
+          {
+            id: 'soulmirror-edge',
+            name: '魂镜光锋',
+            description: '第 2 次进化后，拳击和飞踢命中非己方单位后，自身立即获得 10% 拳击/飞踢回血；并有 5% 概率使该目标下一次拳击或飞踢伤害为 0。',
+            bonuses: {
+              lifestealOnHitRatio: 0.1,
+              nullifyNextHitChance: 0.05
+            }
+          },
+          {
+            id: 'guangmie-dualblade',
+            name: '光灭双刃',
+            description: '第 2 次进化后，基础拳击伤害和基础飞踢伤害各增加 60 点。被动仅可触发 1 次：受到致命伤害时，保留 1 点生命并进入 0.5 秒短暂无敌，同时所有攻击伤害 +100%，持续 1 秒。',
+            bonuses: {
+              punchDamage: 60,
+              kickDamage: 60,
+              equipmentFatalGuardCharges: 1,
+              equipmentFatalGuardLife: 1,
+              equipmentFatalGuardInvincibleMs: 500,
+              equipmentBurstDamageMultiplier: 1,
+              equipmentBurstDurationMs: 1000
+            }
+          }
+        ]
       }
     ]
   },
@@ -153,7 +239,32 @@ export const EQUIPMENT_OPTIONS = [
         bonuses: {
           shieldCharges: 1,
           shieldReduction: 0.6
-        }
+        },
+        secondEvolutionPaths: [
+          {
+            id: 'xuantie-aegis',
+            name: '玄铁反垒',
+            description: '第 2 次进化后，为使用者提供 1 次 75% 减伤护盾；受到伤害时，会将此次伤害的 20% 以反伤形式回敬给对方。',
+            bonuses: {
+              shieldCharges: 1,
+              shieldReduction: 0.75,
+              damageReflectRatio: 0.2
+            }
+          },
+          {
+            id: 'titan-heartwall',
+            name: '巨骸心垒',
+            description: '第 2 次进化后，角色最大生命 +180。被动仅可触发 1 次：生命低于 30% 时，基础拳击伤害和基础飞踢伤害各增加 80 点，持续 8 秒。',
+            bonuses: {
+              health: 180,
+              lowLifeBurstThresholdRatio: 0.3,
+              lowLifeBurstPunchBonus: 80,
+              lowLifeBurstKickBonus: 80,
+              lowLifeBurstDurationMs: 8000,
+              lowLifeBurstCharges: 1
+            }
+          }
+        ]
       },
       {
         id: 'liufeng-cloak',
@@ -161,7 +272,20 @@ export const EQUIPMENT_OPTIONS = [
         description: '进化后获得常驻护盾效果，每次受到伤害时减伤 10%。',
         bonuses: {
           persistentDamageReduction: 0.1
-        }
+        },
+        secondEvolutionPaths: [
+          {
+            id: 'mufeng-lifecape',
+            name: '沐风生披',
+            description: '第 2 次进化后，角色获得 18% 常驻减伤，最大生命 +90；每 5 秒回复 5 点生命。',
+            bonuses: {
+              persistentDamageReduction: 0.18,
+              health: 90,
+              periodicHealAmount: 5,
+              periodicHealIntervalMs: 5000
+            }
+          }
+        ]
       }
     ]
   },
@@ -180,7 +304,27 @@ export const EQUIPMENT_OPTIONS = [
         description: '进化后移动速度增加 80。',
         bonuses: {
           moveSpeed: 80
-        }
+        },
+        secondEvolutionPaths: [
+          {
+            id: 'swiftshadow-greaves',
+            name: '风影行靴',
+            description: '第 2 次进化后，移动速度 +110。被动：减少 15% 受到的拳击伤害。',
+            bonuses: {
+              moveSpeed: 110,
+              punchDamageReduction: 0.15
+            }
+          },
+          {
+            id: 'stormstep-greaves',
+            name: '岚踏行靴',
+            description: '第 2 次进化后，移动速度 +110。被动：减少 10% 受到的飞踢伤害。',
+            bonuses: {
+              moveSpeed: 110,
+              kickDamageReduction: 0.1
+            }
+          }
+        ]
       },
       {
         id: 'lingyue-boots',
@@ -189,7 +333,22 @@ export const EQUIPMENT_OPTIONS = [
         bonuses: {
           moveSpeed: 40,
           jumpVelocity: 50
-        }
+        },
+        secondEvolutionPaths: [
+          {
+            id: 'shenxing-battleboots',
+            name: '神行战履',
+            description: '第 2 次进化后，移动速度 +50，跳跃力度 +50。被动仅可触发 1 次：生命值低于 30% 时触发神行模式，非己方单位无法稳定命中使用者，角色受到的伤害有 50% 概率直接为 0，持续 8 秒。',
+            bonuses: {
+              moveSpeed: 50,
+              jumpVelocity: 50,
+              divineStrideCharges: 1,
+              divineStrideThresholdRatio: 0.3,
+              divineStrideNullifyChance: 0.5,
+              divineStrideDurationMs: 8000
+            }
+          }
+        ]
       }
     ]
   },
@@ -210,7 +369,31 @@ export const EQUIPMENT_OPTIONS = [
           jumpVelocity: 50,
           retaliatoryStunChance: 0.1,
           retaliatoryStunDurationMs: 500
-        }
+        },
+        secondEvolutionPaths: [
+          {
+            id: 'guardecho-spring',
+            name: '守回簧芯',
+            description: '第 2 次进化后，角色最大生命 +35。当身边有己方单位时，队友受到的控制效果有 30% 概率不生效；有非己方单位命中角色时，有 20% 概率被眩晕 0.5 秒。',
+            bonuses: {
+              health: 35,
+              retaliatoryStunChance: 0.2,
+              retaliatoryStunDurationMs: 500,
+              allyControlResistChance: 0.3,
+              allyControlResistRange: 190
+            }
+          },
+          {
+            id: 'warmspring-heart',
+            name: '暖泉心簧',
+            description: '第 2 次进化后，角色最大生命 +42。每 5 秒，为周围血量最低的己方单位（包括自己在内）回复 18 点生命。',
+            bonuses: {
+              health: 42,
+              lowestAllyHealAmount: 18,
+              lowestAllyHealIntervalMs: 5000
+            }
+          }
+        ]
       },
       {
         id: 'quake-spring',
@@ -222,7 +405,37 @@ export const EQUIPMENT_OPTIONS = [
           landingShockwaveHeightRatio: 0.1,
           landingShockwaveRange: 120,
           landingShockwaveVerticalRange: 120
-        }
+        },
+        secondEvolutionPaths: [
+          {
+            id: 'skyquake-spring',
+            name: '天震跃簧',
+            description: '第 2 次进化后，角色最大生命 +40。落地后会对周围左右 132、上下 132 范围内的非己方单位造成 10 + 本次跳跃高度 x 12% 的伤害，并为周围所有己方单位提供 30% 移动加速，持续 4 秒。',
+            bonuses: {
+              health: 40,
+              landingImpactBaseDamage: 10,
+              landingImpactHeightRatio: 0.12,
+              landingImpactRange: 132,
+              landingImpactVerticalRange: 132,
+              landingAllySpeedBoostRatio: 0.3,
+              landingAllyBuffDurationMs: 4000
+            }
+          },
+          {
+            id: 'earthguard-spring',
+            name: '地守跃簧',
+            description: '第 2 次进化后，角色最大生命 +48。落地后会对周围左右 128、上下 128 范围内的非己方单位造成 8 + 本次跳跃高度 x 10% 的伤害，并为周围所有己方单位提供 20% 减伤，持续 4 秒。',
+            bonuses: {
+              health: 48,
+              landingImpactBaseDamage: 8,
+              landingImpactHeightRatio: 0.1,
+              landingImpactRange: 128,
+              landingImpactVerticalRange: 128,
+              landingAllyDefenseReduction: 0.2,
+              landingAllyBuffDurationMs: 4000
+            }
+          }
+        ]
       }
     ]
   }
@@ -710,7 +923,7 @@ export const PLAYER_CHARACTERS = [
     skills: [
       'J 共鸣拳击：沿用基础拳击判定；对附近非己方单位造成 50 + 15% 当前拳击基础伤害，并造成无硬控击退；自身回复 75 + 10% 额外生命的生命值，仅能回复基础生命；同时将 L 技能剩余冷却缩短 50%，并为附近己方单位回复 20% 额外生命。',
       'K 保护飞踢：沿用基础飞踢判定；若场上不存在保护圈，则在自身附近展开持续 4 秒的保护圈，圈展开瞬间击退圈内非己方单位；圈内己方单位每秒回复 5% 额外生命，并获得 +7 拳击基础伤害与 +8 飞踢基础伤害。若保护圈已存在，则本次飞踢改为为自己和附近己方单位附加 1 次独立的 30% 减伤护盾，最多 4 次。',
-      'L 梦想猫虫协奏：召唤 1 只 AI“梦想猫虫”持续 25 秒参战，并让自身获得 4 秒 +90 移动速度；随后朝面朝方向依次放出 6 个可反弹音符。音符命中任意单位会使 hpm 回复 6 + 10% 额外生命；命中非己方单位造成 8 + 20% 当前飞踢基础伤害；命中己方单位则回复 7 + 10% 当前拳击基础伤害。'
+      'L 梦想猫虫协奏：召唤 1 只 AI“梦想猫虫”持续 12 秒参战，并让自身获得 4 秒 +90 移动速度；随后朝面朝方向依次放出 6 个可反弹音符。音符命中任意单位会使 hpm 回复 6 + 10% 额外生命；命中非己方单位造成 8 + 20% 当前飞踢基础伤害；命中己方单位则回复 7 + 10% 当前拳击基础伤害。'
     ],
     abilities: {
       mode: 'hpm-resonance',
@@ -786,7 +999,7 @@ export const PLAYER_CHARACTERS = [
       moveSpeed: '高',
       punchMechanic: 'J 共鸣拳击沿用基础拳击动作与判定，近身命中非己方单位时造成 50 + 当前拳击基础伤害 x 15% 的伤害，并附带不打断动作的纯击退。出拳后 hpm 会回复 75 + 额外生命 x 10% 的生命值，这部分回复只能回到基础生命池，溢出直接丢失；同时还会为周围己方单位回复额外生命 x 20% 的生命，并把 L 技能当前剩余冷却时间直接缩短 50%。',
       kickMechanic: 'K 保护飞踢沿用基础飞踢动作。若场上没有保护圈，则以 hpm 为中心展开半径 155、持续 4 秒的保护圈，出现瞬间会把圈内非己方单位向外击退；圈内己方单位每秒回复额外生命 x 5% 的生命，并获得 +7 拳击基础伤害和 +8 飞踢基础伤害。若保护圈已存在，则本次飞踢不再重复造圈，而是为自己和半径 185 内的己方单位各追加 1 次独立的 30% 减伤护盾，这套护盾与被动护盾分开计算，最多 4 次。',
-      ultimateMechanic: 'L 梦想猫虫协奏冷却 25 秒。施放后会立即召唤 1 只由 AI 控制的己方“梦想猫虫”持续参战 25 秒，并让 hpm 获得 4 秒 +90 移动速度。随后 hpm 朝面朝方向连续放出 6 个音符；每个音符命中任意单位都会让 hpm 回复 6 + 额外生命 x 10% 的生命，命中非己方单位时额外造成 8 + 当前飞踢基础伤害 x 20% 的伤害，命中己方单位时则额外回复 7 + 当前拳击基础伤害 x 10% 的生命。音符碰到墙体与地图边缘不会消失，而是反弹继续飞行。',
+      ultimateMechanic: 'L 梦想猫虫协奏冷却 25 秒。施放后会立即召唤 1 只由 AI 控制的己方“梦想猫虫”持续参战 12 秒，并让 hpm 获得 4 秒 +90 移动速度。随后 hpm 朝面朝方向连续放出 6 个音符；每个音符命中任意单位都会让 hpm 回复 6 + 额外生命 x 10% 的生命，命中非己方单位时额外造成 8 + 当前飞踢基础伤害 x 20% 的伤害，命中己方单位时则额外回复 7 + 当前拳击基础伤害 x 10% 的生命。音符碰到墙体与地图边缘不会消失，而是反弹继续飞行。',
       passiveDetail: 'hpm 的核心资源是“额外生命”，不是实际血量。每次释放 J、K、L 都会获得额外生命，最多累计到 40；每累计拿到 10 点额外生命，就永久保留 1 层共鸣：拳击基础伤害 +6、飞踢基础伤害 +8、增加 1 次 30% 被动减伤护盾，三者各自最多 4 层。停止释放技能 1 秒后，额外生命会每 0.5 秒衰减 10 点，但已经换到手的拳击增伤、飞踢增伤和被动护盾次数不会回退，会一直保留到本局结束。',
       remarks: '偏向打节奏与战区控制，越能持续施法越容易把数值和保护同时滚起来。',
       story: 'hpm 把战斗理解成一种“场域共振”。他不急着在第一时间把每一脚都踢到最大，而是先把节奏、保护、续航和队友站位一起推向自己想要的频率。一旦旋律成型，战场上的每次出拳、飞踢和音符反弹，都会开始替他滚出越来越高的收益。'
@@ -1080,4 +1293,12 @@ export function getEquipmentEvolutionById(equipmentId, evolutionId) {
 
 export function getUnequippedEvolutionById(evolutionId) {
   return UNEQUIPPED_EVOLUTION_OPTIONS.find((evolution) => evolution.id === evolutionId) || null
+}
+
+export function getSecondEvolutionById(evolution, secondEvolutionId) {
+  if (!evolution || !Array.isArray(evolution.secondEvolutionPaths)) {
+    return null
+  }
+
+  return evolution.secondEvolutionPaths.find((item) => item.id === secondEvolutionId) || null
 }

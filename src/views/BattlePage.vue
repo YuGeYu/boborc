@@ -123,10 +123,32 @@
             <p>角色：{{ displayBattleResult.playerName || selectedCharacter.name }}，得分：{{ displayBattleResult.score || 0 }}</p>
           </div>
 
-          <div v-if="latestDebugLog.length" class="debug-log">
+          <div v-if="latestDebugLog.length" class="record-pagination">
+            <span>日志分页：第 {{ latestLogPage }} / {{ latestLogPageCount }} 页</span>
+            <div class="record-pagination-actions">
+              <button
+                class="btn secondary"
+                type="button"
+                :disabled="latestLogPage <= 1"
+                @click="goToLatestLogPage(latestLogPage - 1)"
+              >
+                上一页
+              </button>
+              <button
+                class="btn secondary"
+                type="button"
+                :disabled="latestLogPage >= latestLogPageCount"
+                @click="goToLatestLogPage(latestLogPage + 1)"
+              >
+                下一页
+              </button>
+            </div>
+          </div>
+
+          <div v-if="latestPagedDebugLog.length" class="debug-log">
             <div
-              v-for="(entry, index) in latestDebugLog"
-              :key="`${entry.at}-${index}`"
+              v-for="(entry, index) in latestPagedDebugLog"
+              :key="`${entry.at}-${latestLogPage}-${index}`"
               class="debug-entry"
             >
               <strong>{{ formatDebugTime(entry.at) }} · {{ formatDebugTitle(entry) }}</strong>
@@ -134,16 +156,6 @@
             </div>
           </div>
 
-          <div v-if="progress.battleHistory.length" class="history-list">
-            <div
-              v-for="history in progress.battleHistory"
-              :key="history.id"
-              class="history-entry"
-            >
-              <strong>第 {{ history.level }} 关 · {{ history.isWinner ? '胜利' : '失败' }}</strong>
-              <span>{{ history.playerName || history.playerId }} · 得分 {{ history.score || 0 }} · {{ formatTime(history.playedAt) }}</span>
-            </div>
-          </div>
         </div>
       </article>
     </section>
@@ -160,10 +172,12 @@ export default {
   components: { Game, PageLayout },
   setup() {
     const state = useGameState()
+    const LOGS_PER_PAGE = 20
     const pendingScroll = ref(false)
     const battleInProgress = ref(false)
     const latestBattleResult = ref(null)
     const liveBattleSnapshot = ref(null)
+    const latestLogPage = ref(1)
     let liveLogTimerId = null
 
     const isFinalBossLevel = computed(() => (
@@ -222,6 +236,11 @@ export default {
           .slice()
           .reverse()
       })
+    const latestLogPageCount = computed(() => Math.max(1, Math.ceil(latestDebugLog.value.length / LOGS_PER_PAGE)))
+    const latestPagedDebugLog = computed(() => {
+      const startIndex = (latestLogPage.value - 1) * LOGS_PER_PAGE
+      return latestDebugLog.value.slice(startIndex, startIndex + LOGS_PER_PAGE)
+    })
 
     const liveDebugLog = computed(() => {
       const snapshot = liveBattleSnapshot.value
@@ -353,6 +372,7 @@ export default {
     function onBattleComplete(payload) {
       battleInProgress.value = false
       latestBattleResult.value = payload
+      latestLogPage.value = 1
       readLiveBattleSnapshot()
       stopLiveLogPolling()
       state.handleBattleComplete(payload)
@@ -361,6 +381,10 @@ export default {
     function onBattleRestart() {
       battleInProgress.value = true
       startLiveLogPolling()
+    }
+
+    function goToLatestLogPage(page) {
+      latestLogPage.value = Math.min(latestLogPageCount.value, Math.max(1, Number(page || 1)))
     }
 
     function formatTime(value) {
@@ -504,8 +528,21 @@ export default {
         return `${formatDebugValue('targetId', detail.targetId)}已登场；继承角色：${formatDebugValue('inheritedCharacter', detail.inheritedCharacter)}；持续 ${formatDebugValue('durationMs', detail.durationMs)} 毫秒。`
       }
 
+      if (entry.type === '装备-效果更新') {
+        const equipmentName = formatDebugValue('equipmentName', detail.equipmentName)
+        const evolutionName = detail.equipmentEvolutionName
+          ? `；一阶进化：${formatDebugValue('equipmentEvolutionName', detail.equipmentEvolutionName)}`
+          : ''
+        const secondEvolutionName = detail.equipmentSecondEvolutionName
+          ? `；二阶进化：${formatDebugValue('equipmentSecondEvolutionName', detail.equipmentSecondEvolutionName)}`
+          : ''
+
+        return `原因：${formatDebugValue('reason', detail.reason)}；装备：${equipmentName}${evolutionName}${secondEvolutionName}；最大生命：${formatDebugValue('maxLifePlayer', detail.maxLifePlayer)}；护盾次数：${formatDebugValue('shieldCharges', detail.shieldCharges)}；常驻减伤：${formatDebugValue('persistentDamageReduction', detail.persistentDamageReduction)}；拳击减伤：${formatDebugValue('punchDamageReduction', detail.punchDamageReduction)}；飞踢减伤：${formatDebugValue('kickDamageReduction', detail.kickDamageReduction)}；周期回血：${formatDebugValue('periodicHealAmount', detail.periodicHealAmount)}；最低血友方治疗：${formatDebugValue('lowestAllyHealAmount', detail.lowestAllyHealAmount)}。`
+      }
+
       const labels = {
         attackType: '攻击类型',
+        triggerType: '触发方式',
         reason: '原因',
         remainingMs: '剩余毫秒',
         baseDamage: '基础伤害',
@@ -540,6 +577,7 @@ export default {
         projectileName: '投射物',
         equipmentName: '装备名称',
         equipmentEvolutionName: '进化装备',
+        equipmentSecondEvolutionName: '二阶进化装备',
         threshold: '进化阈值',
         totalDamageDealt: '累计对敌伤害',
         from: '进化前装备',
@@ -590,7 +628,13 @@ export default {
         durationMs: '持续时间',
         inheritedCharacter: '继承角色',
         amount: '数值',
-        markHealCapRatio: '梦印回血上限比例'
+        markHealCapRatio: '梦印回血上限比例',
+        slowRatio: '减速比例',
+        slowDurationMs: '减速持续毫秒',
+        intervalMs: '间隔毫秒',
+        reflectedFrom: '反伤来源',
+        lifestealRatio: '吸血比例',
+        chance: '触发概率'
       }
 
       return Object.entries(detail)
@@ -636,6 +680,19 @@ export default {
         '装备-拳击回血': '装备拳击回血',
         'equipment-proximity-pulse': '近身脉冲',
         'equipment-kick-splash': '飞踢溅射',
+        'equipment-retaliatory-quake': '震域回响',
+        'equipment-hit-slow': '命中缓速',
+        'equipment-hit-nullify': '命中封招',
+        'equipment-nullify-consumed': '封招生效',
+        'equipment-lifesteal': '命中吸血',
+        'equipment-damage-reflect': '受击反伤',
+        'equipment-periodic-heal': '周期回血',
+        'equipment-low-life-burst': '低血爆发',
+        'equipment-divine-stride': '神行模式',
+        'equipment-divine-stride-evade': '神行闪避',
+        'equipment-lowest-ally-heal': '最低血友方治疗',
+        'equipment-landing-ally-buff': '落地团队增益',
+        'equipment-ally-control-resist': '队友抗控',
         'equipment-retaliatory-stun': '受击反震',
         'equipment-jump-boost': '受击跃势',
         'equipment-landing-shockwave': '落地震击',
@@ -674,6 +731,8 @@ export default {
         'timed-invisibility': '周期隐身',
         'fatal-guard-trigger': '致命伤触发隐身',
         'equipment-evolved': '装备进化完成',
+        'equipment-second-evolved': '装备二阶进化完成',
+        'equipment-fatal-guard-triggered': '装备致命守护触发',
         timeout: '自然结束',
         garlic: '大蒜',
         'fake-1': '第一次假身',
@@ -708,6 +767,9 @@ export default {
         'player-defeated': '玩家倒下',
         'kick-miss': '飞踢落空',
         'punch-hit': '拳击命中',
+        'battle-start': '战斗开始',
+        'battle-start-snapshot': '开局快照',
+        'battle-start-load': '读取开局配置',
         normal: '正常发射',
         '想吃棒棒糖': '想吃棒棒糖',
         true: '是',
@@ -770,6 +832,19 @@ export default {
         '装备-拳击回血': '装备拳击回血',
         'equipment-proximity-pulse': '近身脉冲',
         'equipment-kick-splash': '飞踢溅射',
+        'equipment-retaliatory-quake': '震域回响',
+        'equipment-hit-slow': '命中缓速',
+        'equipment-hit-nullify': '命中封招',
+        'equipment-nullify-consumed': '封招生效',
+        'equipment-lifesteal': '命中吸血',
+        'equipment-damage-reflect': '受击反伤',
+        'equipment-periodic-heal': '周期回血',
+        'equipment-low-life-burst': '低血爆发',
+        'equipment-divine-stride': '神行模式',
+        'equipment-divine-stride-evade': '神行闪避',
+        'equipment-lowest-ally-heal': '最低血友方治疗',
+        'equipment-landing-ally-buff': '落地团队增益',
+        'equipment-ally-control-resist': '队友抗控',
         'equipment-retaliatory-stun': '受击反震',
         'equipment-jump-boost': '受击跃势',
         'equipment-landing-shockwave': '落地震击',
@@ -826,6 +901,8 @@ export default {
         'hpm-aura-shield-granted': 'hpm 飞踢护盾发放',
         'hpm-summon-damage': '梦想猫虫命中',
         'hpm-summon-created': '梦想猫虫登场',
+        'equipment-second-evolved': '装备二阶进化完成',
+        'equipment-fatal-guard-triggered': '装备致命守护触发',
         '大蒜-形态切换': '大蒜形态切换',
         '大蒜-真身J结算': '大蒜真身 J 结算'
       }
@@ -847,6 +924,17 @@ export default {
       }
     })
 
+    watch(latestDebugLog, (entries) => {
+      if (!entries.length) {
+        latestLogPage.value = 1
+        return
+      }
+
+      if (latestLogPage.value > latestLogPageCount.value) {
+        latestLogPage.value = latestLogPageCount.value
+      }
+    })
+
     return {
       ...state,
       enhancedBattleConfig,
@@ -855,11 +943,15 @@ export default {
       isFinalBossLevel,
       isGabengLevel,
       latestDebugLog,
+      latestLogPage,
+      latestLogPageCount,
+      latestPagedDebugLog,
       liveDebugLog,
       liveLogUpdatedAt,
       showRecordPanel,
       showRetryPanel,
       showNextLevelPanel,
+      goToLatestLogPage,
       handleGameReady,
       onBattleComplete,
       onBattleRestart,
@@ -946,6 +1038,18 @@ export default {
   line-height: 1.7;
 }
 
+.record-pagination,
+.record-pagination-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.record-pagination {
+  justify-content: space-between;
+  margin-top: 14px;
+}
+
 .debug-log,
 .history-list {
   display: grid;
@@ -964,7 +1068,9 @@ export default {
 
 @media (max-width: 720px) {
   .panel-header,
-  .action-row {
+  .action-row,
+  .record-pagination,
+  .record-pagination-actions {
     flex-direction: column;
     align-items: stretch;
   }

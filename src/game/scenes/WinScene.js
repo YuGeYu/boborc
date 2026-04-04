@@ -1,5 +1,6 @@
 import Phaser, { Scene } from 'phaser'
 import { SUPER_CABBO_UNLOCK_LEVEL } from '@/data/gameContent'
+import { cloneBattleConfig } from '@/game/battleConfig'
 
 let platforms
 let player
@@ -35,12 +36,11 @@ export default class WinScene extends Scene {
 
   update() {
     if (keyE.isDown) {
+      const freshBattleConfig = cloneBattleConfig(this.game.registry.get('initialBattleConfig') || this.battleConfig)
       this.game.events.emit('battle-restart')
       this.scene.start('PlayScene', {
         token: this.token,
-        battleConfig: {
-          ...this.battleConfig
-        }
+        battleConfig: freshBattleConfig
       })
       this.scene.stop()
     }

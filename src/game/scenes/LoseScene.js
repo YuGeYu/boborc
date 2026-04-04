@@ -1,4 +1,5 @@
 import Phaser, { Scene } from 'phaser'
+import { cloneBattleConfig } from '@/game/battleConfig'
 
 let platforms
 let player
@@ -29,12 +30,11 @@ export default class LoseScene extends Scene {
 
   update() {
     if (keyE.isDown) {
+      const freshBattleConfig = cloneBattleConfig(this.game.registry.get('initialBattleConfig') || this.battleConfig)
       this.game.events.emit('battle-restart')
       this.scene.start('PlayScene', {
         token: this.token,
-        battleConfig: {
-          ...this.battleConfig
-        }
+        battleConfig: freshBattleConfig
       })
       this.scene.stop()
     }

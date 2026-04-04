@@ -1,7 +1,7 @@
 <template>
   <PageLayout
     title="装备配置"
-    subtitle="每次出战只能选择 1 件基础装备。若该装备支持进化，则可在此预先选择进化方向；战斗中累计对敌伤害超过 100 后会自动完成进化。"
+    subtitle="每次出战只能选择 1 件基础装备。若该装备支持进化，则可在此预先选择进化方向；战斗中累计对敌伤害超过 100 后会自动完成第 1 次进化，超过 500 后会自动完成第 2 次进化。"
     current-page="equipment"
   >
     <section class="page-grid">
@@ -38,7 +38,7 @@
           >
             <strong>{{ equipment.name }}</strong>
             <p>{{ equipment.description }}</p>
-            <small v-if="equipment.evolutionPaths?.length">可在累计伤害超过 100 后自动进化</small>
+            <small v-if="equipment.evolutionPaths?.length">可在累计伤害超过 100 后自动完成第 1 次进化</small>
             <small v-else>该装备无法进化</small>
           </button>
         </div>
@@ -49,8 +49,8 @@
               <h3>进化方向</h3>
               <span class="muted">当前基础装备：{{ selectedEquipment ? selectedEquipment.name : '不使用装备' }}</span>
             </div>
-            <span class="muted">累计对敌伤害 > 100 时自动覆盖当前基础状态</span>
-          </div>
+              <span class="muted">累计对敌伤害 > 100 时自动覆盖当前基础状态</span>
+            </div>
 
           <div class="evolution-grid">
             <button
@@ -60,6 +60,30 @@
               :class="{ active: selectedEquipmentEvolution?.id === path.id }"
               type="button"
               @click="selectEquipmentEvolution(selectedEquipment ? selectedEquipment.id : null, path.id)"
+            >
+              <strong>{{ path.name }}</strong>
+              <p>{{ path.description }}</p>
+            </button>
+          </div>
+        </div>
+
+        <div v-if="availableSecondEvolutionPaths.length" class="evolution-panel">
+          <div class="panel-header compact">
+            <div>
+              <h3>第 2 次进化</h3>
+              <span class="muted">当前第 1 次进化：{{ selectedEquipmentEvolution ? selectedEquipmentEvolution.name : '未选择' }}</span>
+            </div>
+            <span class="muted">累计对敌伤害 > 500 时自动覆盖当前第 1 次进化状态</span>
+          </div>
+
+          <div class="evolution-grid">
+            <button
+              v-for="path in availableSecondEvolutionPaths"
+              :key="path.id"
+              class="evolution-card"
+              :class="{ active: selectedEquipmentSecondEvolution?.id === path.id }"
+              type="button"
+              @click="selectEquipmentSecondEvolution(selectedEquipment ? selectedEquipment.id : null, selectedEquipmentEvolution?.id || null, path.id)"
             >
               <strong>{{ path.name }}</strong>
               <p>{{ path.description }}</p>
@@ -87,9 +111,12 @@
 
           <div class="info-card">
             <strong>自动进化效果</strong>
-            <p>触发条件：本局累计对敌伤害 > 100</p>
-            <p v-if="selectedEquipmentEvolution">进化结果：{{ selectedEquipmentEvolution.name }}</p>
+            <p>第 1 次进化条件：本局累计对敌伤害 > 100</p>
+            <p v-if="selectedEquipmentEvolution">第 1 次进化结果：{{ selectedEquipmentEvolution.name }}</p>
             <p v-if="selectedEquipmentEvolution">{{ selectedEquipmentEvolution.description }}</p>
+            <p v-if="selectedEquipmentSecondEvolution">第 2 次进化条件：本局累计对敌伤害 > 500</p>
+            <p v-if="selectedEquipmentSecondEvolution">第 2 次进化结果：{{ selectedEquipmentSecondEvolution.name }}</p>
+            <p v-if="selectedEquipmentSecondEvolution">{{ selectedEquipmentSecondEvolution.description }}</p>
             <p v-else-if="selectedEquipment">该装备无法进化。</p>
             <p v-else>未装备时也可以预先选择一条进化方向。</p>
           </div>
@@ -114,10 +141,16 @@ export default {
         ? state.selectedEquipment.value.evolutionPaths
         : (!state.selectedEquipment.value ? UNEQUIPPED_EVOLUTION_OPTIONS : [])
     ))
+    const availableSecondEvolutionPaths = computed(() => (
+      state.selectedEquipmentEvolution.value?.secondEvolutionPaths?.length
+        ? state.selectedEquipmentEvolution.value.secondEvolutionPaths
+        : []
+    ))
 
     return {
       ...state,
-      availableEvolutionPaths
+      availableEvolutionPaths,
+      availableSecondEvolutionPaths
     }
   }
 }

@@ -13,6 +13,7 @@ import {
   getCharacterById,
   getEquipmentEvolutionById,
   getEquipmentById,
+  getSecondEvolutionById,
   getUnequippedEvolutionById,
   getLevelById
 } from '@/data/gameContent'
@@ -366,6 +367,10 @@ function mergeProgressPreservingLocalSelections(remoteProgress, localProgressSna
   mergedProgress.equipmentEvolutionSelections = {
     ...(mergedProgress.equipmentEvolutionSelections || {}),
     ...(localProgress.equipmentEvolutionSelections || {})
+  }
+  mergedProgress.equipmentSecondEvolutionSelections = {
+    ...(mergedProgress.equipmentSecondEvolutionSelections || {}),
+    ...(localProgress.equipmentSecondEvolutionSelections || {})
   }
 
   return mergedProgress
@@ -808,6 +813,27 @@ function selectEquipmentEvolution(equipmentId, evolutionId) {
   return true
 }
 
+function selectEquipmentSecondEvolution(equipmentId, evolutionId, secondEvolutionId) {
+  const evolution = equipmentId === null
+    ? getUnequippedEvolutionById(evolutionId)
+    : getEquipmentEvolutionById(equipmentId, evolutionId)
+
+  if (!evolution) {
+    return false
+  }
+
+  if (secondEvolutionId !== null && !getSecondEvolutionById(evolution, secondEvolutionId)) {
+    return false
+  }
+
+  progress.equipmentSecondEvolutionSelections = {
+    ...(progress.equipmentSecondEvolutionSelections || {}),
+    [evolution.id]: secondEvolutionId
+  }
+  persistStore()
+  return true
+}
+
 function selectLevel(levelId) {
   if (!isLevelUnlocked(levelId)) {
     return false
@@ -860,9 +886,8 @@ function handleBattleComplete(result) {
       playedAt: result.updatedAt,
       summary: result.summary || null,
       debugLog: Array.isArray(result.debugLog) ? result.debugLog : []
-    },
-    ...progress.battleHistory
-  ].slice(0, 20)
+    }
+  ]
 
   if (rewardNotices.length) {
     session.settingsMessage = rewardNotices.join('，')
@@ -1193,6 +1218,15 @@ export function useGameState() {
     const evolutionId = progress.equipmentEvolutionSelections?.[equipment.id] || null
     return getEquipmentEvolutionById(equipment.id, evolutionId) || equipment.evolutionPaths?.[0] || null
   })
+  const selectedEquipmentSecondEvolution = computed(() => {
+    const evolution = selectedEquipmentEvolution.value
+    if (!evolution) {
+      return null
+    }
+
+    const secondEvolutionId = progress.equipmentSecondEvolutionSelections?.[evolution.id] || null
+    return getSecondEvolutionById(evolution, secondEvolutionId) || evolution.secondEvolutionPaths?.[0] || null
+  })
   const activeLevel = computed(() => getLevelById(session.activeLevelId) || LEVELS[0])
   const battleConfig = computed(() => {
     const enemyScale = activeLevel.value.enemyScale
@@ -1200,6 +1234,7 @@ export function useGameState() {
     const equipment = selectedEquipment.value
     const equipmentBonuses = equipment?.bonuses || {}
     const equipmentEvolution = selectedEquipmentEvolution.value
+    const equipmentSecondEvolution = selectedEquipmentSecondEvolution.value
     const playerAbilities = {
       ...(selectedCharacter.value.abilities || {})
     }
@@ -1220,9 +1255,10 @@ export function useGameState() {
       mastery: getMasteryPresentation(progress.characterMastery?.[selectedCharacter.value.id] || 0),
       equipment,
       equipmentEvolution,
+      equipmentSecondEvolution,
       stats: {
         ...selectedCharacter.value.stats,
-        health: roundToTenth(selectedCharacter.value.stats.health),
+        health: roundToTenth(selectedCharacter.value.stats.health + (equipmentBonuses.health || 0)),
         moveSpeed: roundToTenth(selectedCharacter.value.stats.moveSpeed + (equipmentBonuses.moveSpeed || 0)),
         jumpVelocity: roundToTenth(selectedCharacter.value.stats.jumpVelocity + (equipmentBonuses.jumpVelocity || 0)),
         punchDamage: roundToTenth(selectedCharacter.value.stats.punchDamage + (equipmentBonuses.punchDamage || 0)),
@@ -1287,7 +1323,7 @@ export function useGameState() {
     const allyKey = allies.map(actor => actor.id).join('+') || selectedCharacter.value.id
     const enemyKey = enemies.map(actor => actor.id || actor.name).join('+') || AI_OPPONENT.id
 
-    return `${allyKey}-vs-${enemyKey}-${activeLevel.value.id}-${selectedEquipment.value?.id || 'none'}-${selectedEquipmentEvolution.value?.id || 'base'}`
+    return `${allyKey}-vs-${enemyKey}-${activeLevel.value.id}-${selectedEquipment.value?.id || 'none'}-${selectedEquipmentEvolution.value?.id || 'base'}-${selectedEquipmentSecondEvolution.value?.id || 'final-base'}`
   })
   const activityCurrencyLabel = ACTIVITY_CURRENCY_LABEL
   const characterMasteryList = computed(() => PLAYER_CHARACTERS.map((character) => {
@@ -1353,6 +1389,7 @@ export function useGameState() {
     selectedCharacter,
     selectedEquipment,
     selectedEquipmentEvolution,
+    selectedEquipmentSecondEvolution,
     activeLevel,
     battleConfig,
     battleKey,
@@ -1362,6 +1399,7 @@ export function useGameState() {
     selectCharacter,
     selectEquipment,
     selectEquipmentEvolution,
+    selectEquipmentSecondEvolution,
     selectLevel,
     launchBattle,
     restartCurrentLevel,

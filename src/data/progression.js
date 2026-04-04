@@ -64,6 +64,18 @@ export function createDefaultProgress() {
       shoes: 'zhuifeng-lv',
       spring: 'rebound-core'
     },
+    equipmentSecondEvolutionSelections: {
+      'alert-pulse-ring': 'ember-pulse-core',
+      'shockwave-greaves': 'rift-quake-greaves',
+      'pojun-edge': 'tianzhu-breaking-edge',
+      'liuguang-blade': 'soulmirror-edge',
+      'yaogang-bulwark': 'xuantie-aegis',
+      'liufeng-cloak': 'mufeng-lifecape',
+      'zhuifeng-lv': 'swiftshadow-greaves',
+      'lingyue-boots': 'shenxing-battleboots',
+      'rebound-core': 'guardecho-spring',
+      'quake-spring': 'skyquake-spring'
+    },
     unlockedCharacterIds: [PLAYER_CHARACTERS[0].id],
     unlockedLevelIds: [LEVELS[0].id],
     clearedLevelIds: [],
@@ -103,6 +115,12 @@ function normalizeProgress(progress) {
         ...merged.equipmentEvolutionSelections
       }
     : defaultProgress.equipmentEvolutionSelections
+  merged.equipmentSecondEvolutionSelections = merged.equipmentSecondEvolutionSelections && typeof merged.equipmentSecondEvolutionSelections === 'object'
+    ? {
+        ...defaultProgress.equipmentSecondEvolutionSelections,
+        ...merged.equipmentSecondEvolutionSelections
+      }
+    : defaultProgress.equipmentSecondEvolutionSelections
   merged.unlockedLevelIds = Array.isArray(merged.unlockedLevelIds)
     ? [...new Set(merged.unlockedLevelIds)]
     : [LEVELS[0].id]

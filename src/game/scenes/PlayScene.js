@@ -96,6 +96,8 @@ let playerMasteryGlow
 let playerMasteryPulseRing
 let playerMasteryOrbitParticles
 let playerMasteryDimUntil
+let playerEnemySlowUntil
+let playerEnemySlowRatio
 
 const roundToTenth = (value) => Math.round((Number(value) + Number.EPSILON) * 10) / 10
 
@@ -145,7 +147,23 @@ function createEnemyState(scene, id, x, y, enemyConfig = {}) {
     nextAttackNullified: false,
     retaliatoryQuakeSlowUntil: 0,
     retaliatoryQuakeSlowRatio: 0,
-    defeatHandled: false
+    defeatHandled: false,
+    huanerRole: enemyConfig.huanerRole || 'body',
+    huanerOwnerId: enemyConfig.huanerOwnerId || null,
+    huanerIllusionId: enemyConfig.huanerIllusionId || null,
+    huanerNextPunchSkillAt: 0,
+    huanerNextKickSkillAt: 0,
+    huanerNextUltimateAt: 0,
+    huanerEnhancedPunchBonus: 0,
+    huanerSuperArmorUntil: 0,
+    huanerUntargetableUntil: 0,
+    huanerMoveSpeedBonusUntil: 0,
+    huanerMoveSpeedBonusRatio: 0,
+    huanerShieldCharges: 0,
+    huanerShieldReduction: 0,
+    huanerDamageReductionUntil: 0,
+    huanerDamageReductionRatio: 0,
+    huanerMirrorState: null
   }
 }
 
@@ -197,6 +215,7 @@ export default class PlayScene extends Scene {
     this.handlePlayerInput()
     this.updateHpmState()
     this.updateAlliedSupportUnits()
+    this.updateHuanerStates()
     this.handleEnemyAI()
     this.updatePlayerProjectiles()
     this.updateEnemyProjectiles()
@@ -296,7 +315,10 @@ export default class PlayScene extends Scene {
     playerMasteryPulseRing = null
     playerMasteryOrbitParticles = []
     playerMasteryDimUntil = 0
+    playerEnemySlowUntil = 0
+    playerEnemySlowRatio = 0
     this.hpmState = this.createHpmState()
+    this.riverBugState = this.createRiverBugState()
     this.alliedCompanions = []
     this.alliedZones = []
     playerInnateShieldCharges = this.battleConfig.player.baseAbilities?.shieldCharges || 0
@@ -438,6 +460,14 @@ export default class PlayScene extends Scene {
 
   getDreamCatbugConfig() {
     return this.battleConfig.player.abilities?.dreamCatbug || {}
+  }
+
+  isRiverBugPlayer() {
+    return this.battleConfig?.player?.id === 'river-bug'
+  }
+
+  getRiverBugConfig() {
+    return this.battleConfig.player.abilities?.riverBug || {}
   }
 
   healPlayer(healAmount, reason = 'heal', detail = {}, options = {}) {
@@ -742,6 +772,23 @@ export default class PlayScene extends Scene {
       speedBoostUntil: 0,
       protectionCircle: null,
       summon: null
+    }
+  }
+
+  createRiverBugState() {
+    return {
+      bugs: [],
+      punchCastCount: 0,
+      enhancedPunchReady: false,
+      dashWindowUntil: 0,
+      dashCount: 0,
+      dashDirection: 0,
+      dashUntil: 0,
+      dashRechargeCount: 0,
+      dashHitEnemyIds: new Set(),
+      dashExhaustedUntil: 0,
+      nextBugId: 1,
+      nextFusionAt: 0
     }
   }
 
@@ -1422,7 +1469,12 @@ export default class PlayScene extends Scene {
   }
 
   isPlayerUntargetable() {
-    return this.isPlayerInvisible() || this.isEquipmentFatalGuardActive() || this.isGarlicTrueForm() || this.isGarlicTransitioning() || this.isWudiDeathDanceActive()
+    return this.isPlayerInvisible()
+      || this.isEquipmentFatalGuardActive()
+      || this.isGarlicTrueForm()
+      || this.isGarlicTransitioning()
+      || this.isWudiDeathDanceActive()
+      || this.isRiverBugDashUntargetable()
   }
 
   getPlayerUntargetableReason() {
@@ -1444,6 +1496,13 @@ export default class PlayScene extends Scene {
       return {
         reason: 'equipment-divine-stride',
         remainingMs: Math.max(0, playerEquipmentDivineStrideUntil - this.time.now)
+      }
+    }
+
+    if (this.isRiverBugDashUntargetable()) {
+      return {
+        reason: 'river-bug-dash',
+        remainingMs: Math.max(0, this.riverBugState.dashUntil - this.time.now)
       }
     }
 
@@ -1469,11 +1528,500 @@ export default class PlayScene extends Scene {
     const hpmBonus = this.isHpmPlayer() && this.time.now < this.hpmState.speedBoostUntil
       ? Number(this.getHpmConfig().ultimateMoveSpeedBonus || 90)
       : 0
+    const enemySlowMultiplier = this.time.now < playerEnemySlowUntil
+      ? Math.max(0, 1 - Number(playerEnemySlowRatio || 0))
+      : 1
     if (!this.isGarlicTrueForm()) {
-      return roundToTenth((baseSpeed + equipmentSpeedDelta + hpmBonus) * (1 + allySpeedBoost))
+      return roundToTenth((baseSpeed + equipmentSpeedDelta + hpmBonus) * (1 + allySpeedBoost) * enemySlowMultiplier)
     }
 
-    return roundToTenth((baseSpeed + equipmentSpeedDelta + hpmBonus + (this.getGarlicConfig().trueFormMoveSpeedBonus || 0)) * (1 + allySpeedBoost))
+    return roundToTenth(
+      (baseSpeed + equipmentSpeedDelta + hpmBonus + (this.getGarlicConfig().trueFormMoveSpeedBonus || 0)) *
+      (1 + allySpeedBoost) *
+      enemySlowMultiplier
+    )
+  }
+
+  getHuanerConfig(enemyState = this.battleConfig.enemy) {
+    return enemyState?.abilities?.huaner || this.battleConfig.enemy?.abilities?.huaner || null
+  }
+
+  isHuanerEnemy(enemyState) {
+    return enemyState?.abilities?.mode === 'huaner'
+  }
+
+  isHuanerIllusion(enemyState) {
+    return this.isHuanerEnemy(enemyState) && enemyState?.huanerRole === 'illusion'
+  }
+
+  getEnemyDamageReduction(enemyState) {
+    if (!this.isHuanerEnemy(enemyState) || this.time.now >= Number(enemyState?.huanerDamageReductionUntil || 0)) {
+      return 0
+    }
+
+    return Number(enemyState?.huanerDamageReductionRatio || 0)
+  }
+
+  isEnemyUntargetable(enemyState) {
+    return this.isHuanerEnemy(enemyState) && this.time.now < Number(enemyState?.huanerUntargetableUntil || 0)
+  }
+
+  getHuanerSkillDamage(enemyState, baseKey, ratioKey, statKey = 'punchDamage') {
+    const config = this.getHuanerConfig(enemyState)
+    if (!config) {
+      return 0
+    }
+
+    return roundToTenth(
+      Number(config[baseKey] || 0) +
+      Number(enemyState?.stats?.[statKey] || 0) * Number(config[ratioKey] || 0)
+    )
+  }
+
+  getHuanerMarkHost(target) {
+    if (!target) {
+      return null
+    }
+
+    if (target.kind === 'player') {
+      return player
+    }
+
+    return target.companion || null
+  }
+
+  getHuanerMarkState(target) {
+    return this.getHuanerMarkHost(target)?.huanerMarkState || null
+  }
+
+  getHuanerMarkCount(target) {
+    const markState = this.getHuanerMarkState(target)
+    if (!markState || this.time.now >= Number(markState.expiresAt || 0)) {
+      return 0
+    }
+
+    return Number(markState.real ? 1 : 0) + Number(markState.phantom ? 1 : 0)
+  }
+
+  applyHuanerSlowToTarget(target, ratio, durationMs) {
+    if (target?.kind !== 'player' || ratio <= 0 || durationMs <= 0) {
+      return
+    }
+
+    playerEnemySlowRatio = Math.max(Number(playerEnemySlowRatio || 0), Number(ratio))
+    playerEnemySlowUntil = Math.max(Number(playerEnemySlowUntil || 0), this.time.now + Number(durationMs))
+  }
+
+  triggerHuanerShatter(target, sourceEnemy) {
+    const host = this.getHuanerMarkHost(target)
+    const config = this.getHuanerConfig(sourceEnemy)
+    const markState = host?.huanerMarkState
+    if (!host || !config || !markState) {
+      return
+    }
+
+    const shatterCount = this.getHuanerMarkCount(target)
+    if (shatterCount < 2) {
+      return
+    }
+
+    const shatterDamage = roundToTenth(
+      Number(config.shatterDamageBase || 5) * shatterCount +
+      Number(sourceEnemy?.stats?.punchDamage || 0) * Number(config.shatterPunchRatio || 0)
+    )
+
+    host.huanerMarkState = null
+    if (sourceEnemy) {
+      sourceEnemy.huanerNextKickSkillAt = this.time.now
+      sourceEnemy.huanerNextUltimateAt = this.time.now
+      const bodyEnemy = this.isHuanerIllusion(sourceEnemy)
+        ? this.enemies.find((enemy) => enemy.id === sourceEnemy.huanerOwnerId)
+        : sourceEnemy
+      if (bodyEnemy && bodyEnemy !== sourceEnemy) {
+        bodyEnemy.huanerNextKickSkillAt = this.time.now
+        bodyEnemy.huanerNextUltimateAt = this.time.now
+      }
+    }
+
+    this.applyDamageToAllyTarget(target, shatterDamage, {
+      attackType: 'huaner-shatter',
+      enemyId: sourceEnemy?.id || this.battleConfig.enemy.id
+    })
+    this.recordEvent('huaner-shatter', {
+      targetId: target?.kind === 'player' ? 'player' : target?.companion?.id,
+      enemyId: sourceEnemy?.id || this.battleConfig.enemy.id,
+      totalDamage: shatterDamage,
+      markCount: shatterCount
+    })
+  }
+
+  applyHuanerMarkToTarget(target, sourceEnemy) {
+    if (!this.isHuanerEnemy(sourceEnemy)) {
+      return
+    }
+
+    const host = this.getHuanerMarkHost(target)
+    const config = this.getHuanerConfig(sourceEnemy)
+    if (!host || !config) {
+      return
+    }
+
+    const roleKey = this.isHuanerIllusion(sourceEnemy) ? 'phantom' : 'real'
+    const currentState = host.huanerMarkState && this.time.now < Number(host.huanerMarkState.expiresAt || 0)
+      ? host.huanerMarkState
+      : { real: false, phantom: false, expiresAt: 0 }
+
+    host.huanerMarkState = {
+      ...currentState,
+      [roleKey]: true,
+      expiresAt: this.time.now + Number(config.markDurationMs || 6000)
+    }
+
+    this.recordEvent('huaner-mark-applied', {
+      targetId: target?.kind === 'player' ? 'player' : target?.companion?.id,
+      enemyId: sourceEnemy.id,
+      markType: roleKey
+    })
+    this.triggerHuanerShatter(target, sourceEnemy)
+  }
+
+  applyHuanerHitEffects(enemyState, target, attackType) {
+    if (!this.isHuanerEnemy(enemyState) || !target) {
+      return
+    }
+
+    if (attackType === 'huaner-punch-skill') {
+      const config = this.getHuanerConfig(enemyState)
+      this.applyHuanerSlowToTarget(
+        target,
+        Number(config?.punchSkillSlowRatio || 0),
+        Number(config?.punchSkillSlowDurationMs || 0)
+      )
+      enemyState.huanerEnhancedPunchBonus = this.getHuanerSkillDamage(
+        enemyState,
+        'enhancedPunchDamageBase',
+        'enhancedPunchPunchRatio',
+        'punchDamage'
+      )
+      const markCount = this.getHuanerMarkCount(target)
+      const superArmorMs = Math.min(
+        Number(config?.superArmorMaxMs || 2000),
+        markCount * Number(config?.superArmorPerMarkMs || 250)
+      )
+      enemyState.huanerSuperArmorUntil = Math.max(enemyState.huanerSuperArmorUntil, this.time.now + superArmorMs)
+    }
+
+    this.applyHuanerMarkToTarget(target, enemyState)
+  }
+
+  spawnHuanerIllusion(ownerEnemy) {
+    const config = this.getHuanerConfig(ownerEnemy)
+    if (!ownerEnemy?.sprite?.active || !config) {
+      return null
+    }
+
+    const existing = this.enemies.find((enemy) => enemy.id === ownerEnemy.huanerIllusionId && enemy.sprite?.active && enemy.life > 0)
+    if (existing) {
+      return existing
+    }
+
+    const illusionId = `${ownerEnemy.id}-illusion`
+    ownerEnemy.huanerIllusionId = illusionId
+    const illusionConfig = {
+      ...this.battleConfig.enemy,
+      abilities: {
+        ...(ownerEnemy.abilities || {})
+      },
+      stats: {
+        ...ownerEnemy.stats,
+        health: roundToTenth(ownerEnemy.maxLife * Number(config.illusionLifeRatio || 0.1)),
+        punchDamage: roundToTenth(ownerEnemy.stats.punchDamage * Number(config.illusionLifeRatio || 0.1)),
+        kickDamage: roundToTenth(ownerEnemy.stats.kickDamage * Number(config.illusionLifeRatio || 0.1))
+      },
+      huanerRole: 'illusion',
+      huanerOwnerId: ownerEnemy.id
+    }
+    const illusion = createEnemyState(this, illusionId, ownerEnemy.sprite.x + 110, ownerEnemy.sprite.y, illusionConfig)
+    illusion.sprite.setAlpha(0.72)
+    illusion.sprite.setTint(0x8fe6ff)
+    illusion.huanerDamageReductionRatio = Number(config.illusionDamageReduction || 0.2)
+    illusion.huanerDamageReductionUntil = this.time.now + Number(config.ultimateDurationMs || 40000)
+    this.enemies.push(illusion)
+    this.refreshEnemyUi()
+    return illusion
+  }
+
+  interruptHuanerUltimate(enemyState, reason = 'interrupted') {
+    const bodyEnemy = this.isHuanerIllusion(enemyState)
+      ? this.enemies.find((enemy) => enemy.id === enemyState.huanerOwnerId)
+      : enemyState
+    const illusion = bodyEnemy
+      ? this.enemies.find((enemy) => enemy.id === bodyEnemy.huanerIllusionId)
+      : null
+    const mirrorState = bodyEnemy?.huanerMirrorState || null
+
+    if (!bodyEnemy || !mirrorState?.active) {
+      return
+    }
+
+    bodyEnemy.huanerMirrorState = null
+    bodyEnemy.huanerDamageReductionUntil = 0
+    if (illusion) {
+      illusion.huanerMirrorState = null
+      illusion.huanerDamageReductionUntil = 0
+      illusion.actionLockUntil = this.time.now
+      illusion.nextDecisionAt = this.time.now
+    }
+    bodyEnemy.actionLockUntil = this.time.now
+
+    if (illusion?.sprite?.active && illusion.life > 0) {
+      const explosionDamage = this.getHuanerSkillDamage(bodyEnemy, 'mirrorExplosionDamageBase', 'mirrorExplosionPunchRatio', 'punchDamage')
+      this.getAlliedTargets().forEach((target) => {
+        if (Math.abs(target.sprite.x - illusion.sprite.x) <= 136 && Math.abs(target.sprite.y - illusion.sprite.y) <= 128) {
+          this.applyDamageToAllyTarget(target, explosionDamage, {
+            attackType: 'huaner-illusion-explosion',
+            enemyId: illusion.id
+          })
+          this.applyHuanerMarkToTarget(target, illusion)
+        }
+      })
+    }
+
+    this.recordEvent('huaner-ultimate-ended', {
+      enemyId: bodyEnemy.id,
+      reason
+    })
+  }
+
+  executeHuanerMirrorPass(bodyEnemy, illusionEnemy) {
+    const config = this.getHuanerConfig(bodyEnemy)
+    const mirrorState = bodyEnemy?.huanerMirrorState
+    if (!config || !mirrorState || !illusionEnemy?.sprite?.active || illusionEnemy.life <= 0) {
+      this.interruptHuanerUltimate(bodyEnemy, 'illusion-lost')
+      return
+    }
+
+    const fromLeft = mirrorState.passCount % 2 === 0
+    const startX = Number(mirrorState.startX)
+    const endX = Number(mirrorState.endX)
+    bodyEnemy.sprite.x = fromLeft ? startX : endX
+    illusionEnemy.sprite.x = fromLeft ? endX : startX
+    bodyEnemy.sprite.y = mirrorState.centerY
+    illusionEnemy.sprite.y = mirrorState.centerY
+    bodyEnemy.sprite.setVelocity(0, 0)
+    illusionEnemy.sprite.setVelocity(0, 0)
+
+    const hitDamage = this.getHuanerSkillDamage(bodyEnemy, 'mirrorHitDamageBase', 'mirrorHitPunchRatio', 'punchDamage')
+    this.getAlliedTargets().forEach((target) => {
+      const withinX = target.sprite.x >= Math.min(startX, endX) - 14 && target.sprite.x <= Math.max(startX, endX) + 14
+      const withinY = Math.abs(target.sprite.y - mirrorState.centerY) <= 92
+      if (!withinX || !withinY) {
+        return
+      }
+
+      const sourceEnemy = Math.abs(target.sprite.x - bodyEnemy.sprite.x) <= Math.abs(target.sprite.x - illusionEnemy.sprite.x)
+        ? bodyEnemy
+        : illusionEnemy
+      this.applyDamageToAllyTarget(target, hitDamage, {
+        attackType: 'huaner-mirror-pass',
+        enemyId: sourceEnemy.id
+      })
+      this.applyHuanerMarkToTarget(target, sourceEnemy)
+    })
+
+    mirrorState.passCount += 1
+    mirrorState.nextPassAt = this.time.now + Number(config.mirrorTickIntervalMs || 900)
+  }
+
+  startHuanerUltimate(enemyState, target) {
+    const config = this.getHuanerConfig(enemyState)
+    if (!config || !target?.sprite?.active) {
+      return false
+    }
+
+    const illusion = this.spawnHuanerIllusion(enemyState)
+    if (!illusion) {
+      return false
+    }
+
+    enemyState.huanerNextUltimateAt = this.time.now + Number(config.ultimateCooldownMs || 40000)
+    enemyState.huanerMirrorState = {
+      active: true,
+      startX: enemyState.sprite.x,
+      endX: target.sprite.x,
+      centerY: roundToTenth((enemyState.sprite.y + target.sprite.y) / 2),
+      expiresAt: this.time.now + Number(config.ultimateDurationMs || 40000),
+      nextPassAt: this.time.now + 220,
+      passCount: 0
+    }
+    enemyState.huanerDamageReductionRatio = Number(config.selfDamageReduction || 0.1)
+    enemyState.huanerDamageReductionUntil = enemyState.huanerMirrorState.expiresAt
+    illusion.huanerMirrorState = enemyState.huanerMirrorState
+    illusion.huanerDamageReductionRatio = Number(config.illusionDamageReduction || 0.2)
+    illusion.huanerDamageReductionUntil = enemyState.huanerMirrorState.expiresAt
+    enemyState.actionLockUntil = enemyState.huanerMirrorState.expiresAt
+    illusion.actionLockUntil = enemyState.huanerMirrorState.expiresAt
+    illusion.nextDecisionAt = enemyState.huanerMirrorState.expiresAt
+
+    if (target.kind === 'player') {
+      this.controlPlayer(Number(config.mirrorRootDurationMs || 1000), 0, 0, '幻二镜像空间')
+    } else if (target.companion?.sprite?.active) {
+      target.companion.sprite.setVelocity(0, 0)
+    }
+
+    this.recordEvent('huaner-ultimate-started', {
+      enemyId: enemyState.id,
+      targetId: target.kind === 'player' ? 'player' : target.companion?.id
+    })
+    return true
+  }
+
+  executeHuanerPunchSkill(enemyState, target) {
+    const config = this.getHuanerConfig(enemyState)
+    if (!config || !target?.sprite?.active) {
+      return false
+    }
+
+    const direction = target.sprite.x >= enemyState.sprite.x ? 1 : -1
+    enemyState.huanerNextPunchSkillAt = this.time.now + Number(config.punchSkillCooldownMs || 10000)
+    enemyState.nextPunchAt = this.time.now + this.getEnemyAttackCooldown('punch')
+    enemyState.justDown = true
+    enemyState.actionLockUntil = this.time.now + this.getEnemyAttackCooldown('punch')
+    this.doAnim(enemyState.sprite, 'punch2')
+    enemyState.sprite.setVelocityX(direction * 380)
+
+    const damage = this.getHuanerSkillDamage(enemyState, 'punchSkillDamageBase', 'punchSkillPunchRatio', 'punchDamage')
+    this.getAlliedTargets().forEach((allyTarget) => {
+      if (Math.abs(allyTarget.sprite.x - enemyState.sprite.x) <= 172 && Math.abs(allyTarget.sprite.y - enemyState.sprite.y) <= 118) {
+        this.applyDamageToAllyTarget(allyTarget, damage, {
+          attackType: 'huaner-punch-skill',
+          enemyId: enemyState.id
+        })
+        this.applyHuanerHitEffects(enemyState, allyTarget, 'huaner-punch-skill')
+      }
+    })
+
+    window.setTimeout(() => {
+      if (enemyState.sprite?.active) {
+        enemyState.sprite.setVelocityX(0)
+      }
+      enemyState.justDown = false
+    }, this.getEnemyAttackCooldown('punch'))
+    return true
+  }
+
+  executeHuanerKickSkill(enemyState) {
+    const config = this.getHuanerConfig(enemyState)
+    if (!config) {
+      return false
+    }
+
+    enemyState.huanerNextKickSkillAt = this.time.now + Number(config.kickSkillCooldownMs || 9000)
+    enemyState.nextKickAt = this.time.now + this.getEnemyAttackCooldown('kick')
+    enemyState.justDown = true
+    enemyState.actionLockUntil = this.time.now + this.getEnemyAttackCooldown('kick')
+    enemyState.huanerMoveSpeedBonusRatio = Number(config.kickSkillSpeedRatio || 0.5)
+    enemyState.huanerMoveSpeedBonusUntil = this.time.now + Number(config.kickSkillSpeedDurationMs || 1000)
+    enemyState.huanerUntargetableUntil = this.time.now + Number(config.kickSkillUntargetableMs || 1500)
+    enemyState.huanerShieldReduction = Number(config.kickShieldReduction || 0.3)
+    this.doAnim(enemyState.sprite, 'jumpkick2')
+
+    const damage = this.getHuanerSkillDamage(enemyState, 'kickSkillDamageBase', 'kickSkillKickRatio', 'kickDamage')
+    const healPerTarget = this.getHuanerSkillDamage(enemyState, 'kickSkillHealBase', 'kickSkillHealKickRatio', 'kickDamage')
+    let hitCount = 0
+    this.getAlliedTargets().forEach((target) => {
+      if (Math.abs(target.sprite.x - enemyState.sprite.x) <= 140 && Math.abs(target.sprite.y - enemyState.sprite.y) <= 128) {
+        hitCount += 1
+        this.applyDamageToAllyTarget(target, damage, {
+          attackType: 'huaner-kick-skill',
+          enemyId: enemyState.id
+        })
+        this.applyHuanerHitEffects(enemyState, target, 'huaner-kick-skill')
+      }
+    })
+
+    if (hitCount > 0) {
+      enemyState.life = roundToTenth(Math.min(enemyState.maxLife, enemyState.life + hitCount * healPerTarget))
+      enemyState.huanerShieldCharges += hitCount
+      this.refreshEnemyUi()
+    }
+
+    window.setTimeout(() => {
+      enemyState.justDown = false
+    }, this.getEnemyAttackCooldown('kick'))
+    return true
+  }
+
+  handleHuanerAI(enemyState, target) {
+    if (!this.isHuanerEnemy(enemyState)) {
+      return false
+    }
+
+    if (this.isHuanerIllusion(enemyState)) {
+      enemyState.nextDecisionAt = this.time.now + 160
+      return true
+    }
+
+    if (enemyState.huanerMirrorState?.active) {
+      enemyState.nextDecisionAt = this.time.now + 120
+      return true
+    }
+
+    const now = this.time.now
+    const deltaX = Math.abs(target.sprite.x - enemyState.sprite.x)
+    const deltaY = Math.abs(target.sprite.y - enemyState.sprite.y)
+
+    if (now >= Number(enemyState.huanerNextUltimateAt || 0) && deltaX < 240) {
+      return this.startHuanerUltimate(enemyState, target)
+    }
+
+    if (now >= Number(enemyState.huanerNextKickSkillAt || 0) && now >= enemyState.nextKickAt && deltaX < 140 && deltaY < 130) {
+      return this.executeHuanerKickSkill(enemyState)
+    }
+
+    if (now >= Number(enemyState.huanerNextPunchSkillAt || 0) && now >= enemyState.nextPunchAt && deltaX < 210 && deltaY < 120) {
+      return this.executeHuanerPunchSkill(enemyState, target)
+    }
+
+    return false
+  }
+
+  updateHuanerStates() {
+    const living = this.livingEnemies().filter((enemyState) => this.isHuanerEnemy(enemyState))
+    living.forEach((enemyState) => {
+      if (enemyState.justDown && this.time.now >= Number(enemyState.huanerUntargetableUntil || 0) && !enemyState.huanerMirrorState?.active) {
+        enemyState.sprite.clearTint()
+      } else if (this.isEnemyUntargetable(enemyState)) {
+        enemyState.sprite.setTint(0xa6f5ff)
+      } else if (this.isHuanerIllusion(enemyState)) {
+        enemyState.sprite.setTint(0x8fe6ff)
+      }
+
+      if (this.isHuanerIllusion(enemyState) && !enemyState.huanerMirrorState?.active) {
+        const owner = this.enemies.find((enemy) => enemy.id === enemyState.huanerOwnerId)
+        if (!owner?.sprite?.active || owner.life <= 0) {
+          enemyState.life = 0
+          this.handleEnemyDefeat(enemyState)
+          return
+        }
+
+        enemyState.sprite.x = owner.sprite.x + (owner.flipX ? 90 : -90)
+        enemyState.sprite.y = owner.sprite.y
+        enemyState.sprite.setVelocity(0, 0)
+      }
+
+      if (!this.isHuanerIllusion(enemyState) && enemyState.huanerMirrorState?.active) {
+        const illusion = this.enemies.find((enemy) => enemy.id === enemyState.huanerIllusionId)
+        if (this.time.now >= Number(enemyState.huanerMirrorState.expiresAt || 0)) {
+          this.interruptHuanerUltimate(enemyState, 'duration-ended')
+          return
+        }
+
+        if (this.time.now >= Number(enemyState.huanerMirrorState.nextPassAt || 0)) {
+          this.executeHuanerMirrorPass(enemyState, illusion)
+        }
+      }
+    })
   }
 
   getDreamCatbugMarkState(target) {
@@ -1701,9 +2249,517 @@ export default class PlayScene extends Scene {
     })
   }
 
+  getRiverBugDirection() {
+    return player.flipX ? -1 : 1
+  }
+
+  getRiverBugTouchRadius() {
+    return Number(this.getRiverBugConfig().chainBugTouchRadius || 28)
+  }
+
+  getRiverBugPlayerTouchRadius() {
+    return Number(this.getRiverBugConfig().chainPlayerTouchRadius || 28)
+  }
+
+  isRiverBugDashActive() {
+    return this.isRiverBugPlayer() && this.time.now < Number(this.riverBugState?.dashUntil || 0)
+  }
+
+  isRiverBugDashBodyActive() {
+    return this.isRiverBugDashActive() && Number(this.riverBugState?.dashCount || 0) >= Number(this.getRiverBugConfig().dashBodyThreshold || 3)
+  }
+
+  isRiverBugDashUntargetable() {
+    return this.isRiverBugDashActive() && Number(this.riverBugState?.dashCount || 0) >= Number(this.getRiverBugConfig().dashUntargetableThreshold || 6)
+  }
+
+  canRiverBugDash() {
+    return this.isRiverBugPlayer()
+      && this.time.now < Number(this.riverBugState?.dashWindowUntil || 0)
+      && this.time.now >= Number(this.riverBugState?.dashExhaustedUntil || 0)
+      && !this.isRiverBugDashActive()
+      && lifePlayer > 0
+  }
+
+  getRiverBugBonusDamage(base, ratio, statGetter) {
+    return roundToTenth(Number(base || 0) + statGetter.call(this) * Number(ratio || 0))
+  }
+
+  spawnRiverBug(options = {}) {
+    if (!this.isRiverBugPlayer() || !playerProjectiles) {
+      return null
+    }
+
+    const config = this.getRiverBugConfig()
+    const textureKey = config.bugTextureKey
+    if (!textureKey) {
+      return null
+    }
+
+    const direction = Number(options.direction || this.getRiverBugDirection() || 1) >= 0 ? 1 : -1
+    const startX = Number(options.x ?? (player.x + direction * Number(config.punchBugOffsetX || 42)))
+    const startY = Number(options.y ?? (player.y + Number(config.punchBugOffsetY || 18)))
+    const sprite = playerProjectiles.create(startX, startY, textureKey)
+    sprite.setDepth(8)
+    sprite.body.setAllowGravity(false)
+    sprite.setCollideWorldBounds(false)
+
+    const bug = {
+      id: `river-bug-${this.riverBugState.nextBugId++}`,
+      sprite,
+      kind: options.kind || 'punch-crawler',
+      direction,
+      speed: Number(options.speed || 0),
+      startX,
+      maxTravelDistance: Number(options.maxTravelDistance || 0),
+      expiresAt: Number(options.expiresAt || 0),
+      activationAt: Number(options.activationAt || 0),
+      moveTowardPlayer: Boolean(options.moveTowardPlayer),
+      hitDamage: Number(options.hitDamage || 0),
+      explosionDamage: Number(options.explosionDamage || 0),
+      spawnDamage: Number(options.spawnDamage || 0),
+      rangeX: Number(options.rangeX || 120),
+      rangeY: Number(options.rangeY || 110),
+      explosionRangeX: Number(options.explosionRangeX || options.rangeX || 120),
+      explosionRangeY: Number(options.explosionRangeY || options.rangeY || 110),
+      slowRatio: Number(options.slowRatio || 0),
+      slowDurationMs: Number(options.slowDurationMs || 0),
+      hitEnemyIds: new Map(),
+      canTriggerFusion: options.canTriggerFusion !== false,
+      pickupEnabled: options.pickupEnabled !== false,
+      pickupEnabledAt: Number(options.pickupEnabledAt || (this.time.now + 180)),
+      wasMoving: false
+    }
+
+    sprite.displayWidth = Number(options.displayWidth || 34)
+    sprite.displayHeight = Number(options.displayHeight || 34)
+    sprite.riverBugId = bug.id
+    sprite.setVelocityX(bug.speed * direction)
+    sprite.setVelocityY(0)
+    this.riverBugState.bugs.push(bug)
+    return bug
+  }
+
+  triggerRiverBugAreaDamage(x, y, damage, attackType, rangeX, rangeY, detail = {}) {
+    const targets = this.livingEnemies().filter((enemyState) => (
+      enemyState.sprite?.active &&
+      Math.abs(enemyState.sprite.x - x) <= rangeX &&
+      Math.abs(enemyState.sprite.y - y) <= rangeY
+    ))
+
+    targets.forEach((enemyState) => {
+      this.applyFlatDamageToEnemy(enemyState, damage, attackType, {
+        baseDamage: damage,
+        skipSound: true,
+        ...detail
+      })
+      if (detail.slowRatio > 0 && detail.slowDurationMs > 0) {
+        this.applyRetaliatoryQuakeSlow(enemyState, detail.slowRatio, detail.slowDurationMs)
+      }
+    })
+
+    if (targets.length) {
+      this.recordEvent(attackType, {
+        x: roundToTenth(x),
+        y: roundToTenth(y),
+        totalDamage: damage,
+        hitTargets: targets.map((enemyState) => enemyState.id),
+        ...detail
+      })
+    }
+  }
+
+  removeRiverBug(bug, reason = 'expired') {
+    if (!bug) {
+      return
+    }
+
+    if (bug.sprite?.active) {
+      bug.sprite.destroy()
+    }
+    this.riverBugState.bugs = this.riverBugState.bugs.filter((item) => item !== bug)
+    this.recordEvent('river-bug-ended', {
+      bugId: bug.id,
+      reason,
+      kind: bug.kind
+    })
+  }
+
+  triggerRiverBugEnhancedPunch(reason = 'enhanced-ready') {
+    if (!this.isRiverBugPlayer()) {
+      return
+    }
+
+    this.riverBugState.enhancedPunchReady = true
+    this.recordEvent('river-bug-enhanced-punch-ready', {
+      reason,
+      punchCount: this.riverBugState.punchCastCount
+    })
+  }
+
+  consumeRiverBugEnhancedPunch() {
+    if (!this.isRiverBugPlayer() || !this.riverBugState.enhancedPunchReady) {
+      return false
+    }
+
+    const config = this.getRiverBugConfig()
+    const damage = this.getRiverBugBonusDamage(
+      config.enhancedPunchBaseDamage,
+      config.enhancedPunchPunchRatio,
+      this.getPlayerPunchDamage
+    )
+    const targets = this.getEnemiesInDirectionalRange(
+      Number(config.enhancedPunchRange || 248),
+      Number(config.enhancedPunchVerticalRange || 138)
+    )
+
+    this.riverBugState.enhancedPunchReady = false
+    targets.forEach((enemyState) => {
+      this.applyFlatDamageToEnemy(enemyState, damage, 'river-bug-enhanced-punch', {
+        baseDamage: damage,
+        skipSound: true
+      })
+    })
+    this.recordEvent('river-bug-enhanced-punch-fired', {
+      totalDamage: damage,
+      hitTargets: targets.map((enemyState) => enemyState.id)
+    })
+    return true
+  }
+
+  maybeGrantRiverBugEnhancedPunchFromCounter() {
+    if (!this.isRiverBugPlayer()) {
+      return
+    }
+
+    this.riverBugState.punchCastCount += 1
+    const targetCount = Number(this.getRiverBugConfig().passiveThirdPunchCount || 3)
+    if (this.riverBugState.punchCastCount % targetCount === 0) {
+      this.triggerRiverBugEnhancedPunch('third-punch')
+    }
+  }
+
+  executeRiverBugPunchSkill() {
+    const config = this.getRiverBugConfig()
+    this.consumeRiverBugEnhancedPunch()
+    this.maybeGrantRiverBugEnhancedPunchFromCounter()
+
+    const hitDamage = this.getRiverBugBonusDamage(
+      config.punchBugHitBaseDamage,
+      config.punchBugHitPunchRatio,
+      this.getPlayerPunchDamage
+    )
+    const explosionDamage = this.getRiverBugBonusDamage(
+      config.punchBugExplosionBaseDamage,
+      config.punchBugExplosionPunchRatio,
+      this.getPlayerPunchDamage
+    )
+
+    this.spawnRiverBug({
+      kind: 'punch-crawler',
+      speed: Number(config.punchBugSpeed || 165),
+      maxTravelDistance: Number(config.punchBugMaxTravelDistance || 260),
+      hitDamage,
+      explosionDamage,
+      rangeX: Number(config.punchBugExplosionRange || 132),
+      rangeY: Number(config.punchBugExplosionVerticalRange || 126),
+      explosionRangeX: Number(config.punchBugExplosionRange || 132),
+      explosionRangeY: Number(config.punchBugExplosionVerticalRange || 126)
+    })
+  }
+
+  executeRiverBugKickSkill() {
+    const config = this.getRiverBugConfig()
+    const spawnDamage = this.getRiverBugBonusDamage(
+      config.kickBugSpawnBaseDamage,
+      config.kickBugSpawnKickRatio,
+      this.getPlayerKickDamage
+    )
+    const hitDamage = this.getRiverBugBonusDamage(
+      config.kickBugHitBaseDamage,
+      config.kickBugHitKickRatio,
+      this.getPlayerKickDamage
+    )
+    const bug = this.spawnRiverBug({
+      kind: 'kick-stationary',
+      x: player.x,
+      y: player.y + Number(config.kickBugOffsetY || 18),
+      speed: 0,
+      activationAt: this.time.now + Number(config.kickBugDelayMs || 1500),
+      moveTowardPlayer: true,
+      maxTravelDistance: Number(config.kickBugTravelDistance || 210),
+      hitDamage,
+      spawnDamage,
+      rangeX: Number(config.kickBugSpawnRange || 120),
+      rangeY: Number(config.kickBugSpawnVerticalRange || 110),
+      slowRatio: Number(config.kickBugSlowRatio || 0.25),
+      slowDurationMs: Number(config.kickBugSlowDurationMs || 1800)
+    })
+
+    this.triggerRiverBugAreaDamage(
+      player.x,
+      player.y,
+      spawnDamage,
+      'river-bug-kick-spawn',
+      Number(config.kickBugSpawnRange || 120),
+      Number(config.kickBugSpawnVerticalRange || 110)
+    )
+
+    if (bug?.sprite?.active) {
+      bug.sprite.setVelocity(0, 0)
+    }
+  }
+
+  armRiverBugDash() {
+    if (!this.isRiverBugPlayer()) {
+      return
+    }
+
+    const config = this.getRiverBugConfig()
+    if (this.time.now < this.riverBugState.dashExhaustedUntil) {
+      this.recordEvent('river-bug-dash-blocked', {
+        reason: 'exhausted',
+        remainingMs: Math.max(0, this.riverBugState.dashExhaustedUntil - this.time.now)
+      })
+      return
+    }
+
+    this.riverBugState.dashWindowUntil = this.time.now + Number(config.dashWindowMs || 1000)
+    this.riverBugState.dashRechargeCount = Math.max(1, this.riverBugState.dashRechargeCount)
+    this.recordEvent('river-bug-dash-armed', {
+      remainingMs: Math.max(0, this.riverBugState.dashWindowUntil - this.time.now)
+    })
+  }
+
+  startRiverBugDash(direction) {
+    if (!this.canRiverBugDash()) {
+      return false
+    }
+
+    const config = this.getRiverBugConfig()
+    const dashDirection = direction >= 0 ? 1 : -1
+    const durationMs = Number(config.dashDurationMs || 240)
+    const distance = Number(config.dashDistance || 270)
+    const speed = distance / Math.max(0.05, durationMs / 1000)
+
+    this.riverBugState.dashRechargeCount = Math.max(0, this.riverBugState.dashRechargeCount - 1)
+    this.riverBugState.dashCount += 1
+    this.riverBugState.dashDirection = dashDirection
+    this.riverBugState.dashUntil = this.time.now + durationMs
+    this.riverBugState.dashHitEnemyIds = new Set()
+    this.riverBugState.dashWindowUntil = this.riverBugState.dashRechargeCount > 0
+      ? this.time.now + Number(config.dashWindowMs || 1000)
+      : 0
+
+    player.flipX = dashDirection < 0
+    player.setVelocityX(dashDirection * speed)
+    player.setVelocityY(0)
+    this.doAnim(player, 'walk')
+
+    if (this.riverBugState.dashCount >= Number(config.dashMaxCount || 9)) {
+      this.riverBugState.dashExhaustedUntil = this.time.now + Number(config.dashExhaustedDurationMs || 40000)
+      this.riverBugState.dashWindowUntil = 0
+      this.riverBugState.dashRechargeCount = 0
+    }
+
+    this.recordEvent('river-bug-dash-started', {
+      direction: dashDirection,
+      dashCount: this.riverBugState.dashCount,
+      bodyActive: this.isRiverBugDashBodyActive(),
+      untargetableActive: this.isRiverBugDashUntargetable()
+    })
+    return true
+  }
+
+  updateRiverBugDash() {
+    if (!this.isRiverBugPlayer()) {
+      return
+    }
+
+    if (this.isRiverBugDashActive()) {
+      const config = this.getRiverBugConfig()
+      const damage = this.getRiverBugBonusDamage(
+        config.dashHitBaseDamage,
+        config.dashHitPunchRatio,
+        this.getPlayerPunchDamage
+      )
+
+      this.livingEnemies().forEach((enemyState) => {
+        if (
+          enemyState.sprite?.active &&
+          !this.riverBugState.dashHitEnemyIds.has(enemyState.id) &&
+          Math.abs(enemyState.sprite.x - player.x) <= 44 &&
+          Math.abs(enemyState.sprite.y - player.y) <= 96
+        ) {
+          this.riverBugState.dashHitEnemyIds.add(enemyState.id)
+          this.applyFlatDamageToEnemy(enemyState, damage, 'river-bug-dash', {
+            baseDamage: damage,
+            skipSound: true
+          })
+        }
+      })
+
+      this.riverBugState.bugs.slice().forEach((bug) => {
+        if (!bug?.sprite?.active) {
+          return
+        }
+        if (Math.hypot(bug.sprite.x - player.x, bug.sprite.y - player.y) <= this.getRiverBugPlayerTouchRadius()) {
+          this.riverBugState.dashRechargeCount += 1
+          this.riverBugState.dashWindowUntil = this.time.now + Number(config.dashWindowMs || 1000)
+          this.removeRiverBug(bug, 'dash-recharged')
+        }
+      })
+
+      if (this.time.now >= this.riverBugState.dashUntil) {
+        this.riverBugState.dashUntil = 0
+        this.stop(player)
+      }
+    }
+  }
+
+  updateRiverBugBugs() {
+    if (!this.isRiverBugPlayer()) {
+      return
+    }
+
+    const config = this.getRiverBugConfig()
+    this.updateRiverBugDash()
+
+    this.riverBugState.bugs.slice().forEach((bug) => {
+      if (!bug?.sprite?.active) {
+        this.removeRiverBug(bug, 'inactive')
+        return
+      }
+
+      if (bug.expiresAt > 0 && this.time.now >= bug.expiresAt) {
+        this.removeRiverBug(bug, 'timeout')
+        return
+      }
+
+      if (bug.activationAt > 0 && this.time.now >= bug.activationAt && !bug.wasMoving) {
+        bug.wasMoving = true
+        bug.activationAt = 0
+        if (bug.moveTowardPlayer) {
+          bug.direction = player.x >= bug.sprite.x ? 1 : -1
+          bug.speed = Number(config.kickBugTravelSpeed || 150)
+          bug.startX = bug.sprite.x
+          bug.sprite.setVelocityX(bug.direction * bug.speed)
+        }
+      }
+
+      if (bug.speed > 0) {
+        bug.sprite.setVelocityX(bug.direction * bug.speed)
+      } else {
+        bug.sprite.setVelocityX(0)
+      }
+
+      if (bug.maxTravelDistance > 0 && Math.abs(bug.sprite.x - bug.startX) >= bug.maxTravelDistance) {
+        if (bug.explosionDamage > 0) {
+          this.triggerRiverBugAreaDamage(
+            bug.sprite.x,
+            bug.sprite.y,
+            bug.explosionDamage,
+            'river-bug-explosion',
+            bug.explosionRangeX,
+            bug.explosionRangeY,
+            { sourceBugId: bug.id }
+          )
+        }
+        this.removeRiverBug(bug, 'travel-finished')
+        return
+      }
+
+      this.livingEnemies().forEach((enemyState) => {
+        if (!enemyState.sprite?.active || bug.hitDamage <= 0) {
+          return
+        }
+
+        const lastHitAt = Number(bug.hitEnemyIds.get(enemyState.id) || 0)
+        if (this.time.now - lastHitAt < 280) {
+          return
+        }
+
+        if (Math.hypot(enemyState.sprite.x - bug.sprite.x, enemyState.sprite.y - bug.sprite.y) <= 36) {
+          bug.hitEnemyIds.set(enemyState.id, this.time.now)
+          this.applyFlatDamageToEnemy(enemyState, bug.hitDamage, 'river-bug-hit', {
+            baseDamage: bug.hitDamage,
+            sourceBugId: bug.id,
+            skipSound: true
+          })
+          if (bug.slowRatio > 0 && bug.slowDurationMs > 0) {
+            this.applyRetaliatoryQuakeSlow(enemyState, bug.slowRatio, bug.slowDurationMs)
+          }
+        }
+      })
+
+      if (
+        bug.pickupEnabled &&
+        this.time.now >= bug.pickupEnabledAt &&
+        Math.hypot(player.x - bug.sprite.x, player.y - bug.sprite.y) <= this.getRiverBugPlayerTouchRadius()
+      ) {
+        const healAmount = this.getRiverBugBonusDamage(
+          config.bugPickupHealBase,
+          config.bugPickupKickRatio,
+          this.getPlayerKickDamage
+        )
+        this.healPlayer(healAmount, 'river-bug-pickup', { sourceBugId: bug.id })
+        this.triggerRiverBugEnhancedPunch('bug-pickup')
+        this.removeRiverBug(bug, 'picked-up')
+      }
+    })
+
+    if (this.time.now >= this.riverBugState.nextFusionAt) {
+      const bugs = this.riverBugState.bugs.filter((bug) => bug?.sprite?.active && bug.canTriggerFusion)
+      for (let index = 0; index < bugs.length; index += 1) {
+        for (let compareIndex = index + 1; compareIndex < bugs.length; compareIndex += 1) {
+          const bugA = bugs[index]
+          const bugB = bugs[compareIndex]
+          if (Math.hypot(bugA.sprite.x - bugB.sprite.x, bugA.sprite.y - bugB.sprite.y) <= this.getRiverBugTouchRadius()) {
+            const fusionDamage = this.getRiverBugBonusDamage(
+              config.bugFusionBaseDamage,
+              config.bugFusionPunchRatio,
+              this.getPlayerPunchDamage
+            )
+            const fusionX = (bugA.sprite.x + bugB.sprite.x) / 2
+            const fusionY = (bugA.sprite.y + bugB.sprite.y) / 2
+            this.triggerRiverBugAreaDamage(
+              fusionX,
+              fusionY,
+              fusionDamage,
+              'river-bug-fusion',
+              Number(config.bugFusionRange || 138),
+              Number(config.bugFusionVerticalRange || 126),
+              { bugA: bugA.id, bugB: bugB.id }
+            )
+            this.spawnRiverBug({
+              kind: 'fusion-crawler',
+              x: fusionX,
+              y: fusionY,
+              direction: bugA.direction,
+              speed: Number(config.punchBugSpeed || 165) * 0.85,
+              maxTravelDistance: 150,
+              hitDamage: this.getRiverBugBonusDamage(config.punchBugHitBaseDamage, config.punchBugHitPunchRatio, this.getPlayerPunchDamage),
+              canTriggerFusion: false
+            })
+            this.riverBugState.nextFusionAt = this.time.now + 220
+            return
+          }
+        }
+      }
+    }
+  }
+
   getEnemyMoveSpeed(enemyState) {
     const baseSpeed = Number(enemyState?.stats?.moveSpeed || this.battleConfig.enemy.stats.moveSpeed || 0)
-    return roundToTenth(baseSpeed * this.getDreamCatbugSlowMultiplier(enemyState) * this.getRetaliatoryQuakeSlowMultiplier(enemyState))
+    const huanerBonusRatio = this.isHuanerEnemy(enemyState) && this.time.now < Number(enemyState?.huanerMoveSpeedBonusUntil || 0)
+      ? Number(enemyState?.huanerMoveSpeedBonusRatio || 0)
+      : 0
+    return roundToTenth(
+      baseSpeed *
+      (1 + huanerBonusRatio) *
+      this.getDreamCatbugSlowMultiplier(enemyState) *
+      this.getRetaliatoryQuakeSlowMultiplier(enemyState)
+    )
   }
 
   getPlayerJumpHeightEstimate() {
@@ -1872,6 +2928,12 @@ export default class PlayScene extends Scene {
       return `梦想猫虫状态：梦印 ${markedCount} / 糖灵 ${this.formatNumber(candyRemainingMs / 1000)} 秒`
     }
 
+    if (this.isRiverBugPlayer()) {
+      const dashReadyMs = Math.max(0, Number(this.riverBugState.dashWindowUntil || 0) - this.time.now)
+      const exhaustedMs = Math.max(0, Number(this.riverBugState.dashExhaustedUntil || 0) - this.time.now)
+      return `河边的小虫状态：强化拳 ${this.riverBugState.enhancedPunchReady ? '已就绪' : '未就绪'} / 小虫 ${this.riverBugState.bugs.length} / 冲刺 ${this.riverBugState.dashCount} / 续冲窗 ${this.formatNumber(dashReadyMs / 1000)} 秒 / 疲劳 ${this.formatNumber(exhaustedMs / 1000)} 秒`
+    }
+
     if (this.isHpmPlayer()) {
       const remainingUltimate = Math.max(0, playerNextUltimateAt - this.time.now)
       return `hpm 状态：额外生命 ${this.formatNumber(this.getHpmExtraLife())} / 被动盾 ${this.hpmState.passiveShieldCharges} / 飞踢盾 ${this.hpmState.auraShieldCharges} / L ${this.formatNumber(remainingUltimate / 1000)} 秒`
@@ -2000,7 +3062,16 @@ export default class PlayScene extends Scene {
       }
     }
 
+    if (this.isRiverBugPlayer()) {
+      if (this.isRiverBugDashUntargetable()) {
+        player.setAlpha(0.45)
+      } else if (!this.isPlayerInvisible() && !this.isGarlicTrueForm() && player.alpha !== 1) {
+        player.setAlpha(1)
+      }
+    }
+
     this.updateDreamCatbugState()
+    this.updateRiverBugBugs()
 
     if (playerStatusText) {
       playerStatusText.setText(this.getPlayerStatusLabel())
@@ -2231,7 +3302,24 @@ export default class PlayScene extends Scene {
       return
     }
 
-    if (this.isHpmPlayer() && this.availableHitJustDown(keyUltimate) && now >= playerNextUltimateAt) {
+    if (this.isRiverBugDashActive()) {
+      this.doAnim(player, 'walk')
+      return
+    }
+
+    if (this.isRiverBugPlayer() && this.canRiverBugDash() && (this.availableSideIsDown(keyA) || this.availableSideIsDown(keyD))) {
+      this.startRiverBugDash(this.availableSideIsDown(keyA) ? -1 : 1)
+      return
+    }
+
+    if (this.isRiverBugPlayer() && this.availableHitJustDown(keyUltimate) && now >= playerNextUltimateAt) {
+      justDownPlayer = true
+      playerNextUltimateAt = now + this.getPlayerUltimateCooldown()
+      this.armRiverBugDash()
+      window.setTimeout(() => {
+        justDownPlayer = false
+      }, 140)
+    } else if (this.isHpmPlayer() && this.availableHitJustDown(keyUltimate) && now >= playerNextUltimateAt) {
       justDownPlayer = true
       playerNextUltimateAt = now + this.getPlayerUltimateCooldown()
       this.executeHpmUltimate()
@@ -2277,6 +3365,14 @@ export default class PlayScene extends Scene {
       return
     }
 
+    if (this.isHuanerEnemy(enemyState) && this.time.now < Number(enemyState.huanerSuperArmorUntil || 0)) {
+      return
+    }
+
+    if (this.isHuanerEnemy(enemyState) && enemyState.huanerMirrorState?.active) {
+      this.interruptHuanerUltimate(enemyState, 'controlled')
+    }
+
     enemyState.justDown = false
     enemyState.hitPlayer = false
     enemyState.actionLockUntil = Math.max(enemyState.actionLockUntil, this.time.now + durationMs)
@@ -2288,6 +3384,14 @@ export default class PlayScene extends Scene {
 
   controlPlayer(durationMs, knockbackX = 0, knockbackY = 0, reason = '受控') {
     if (!player?.active || lifePlayer <= 0) {
+      return
+    }
+
+    if (this.isRiverBugDashBodyActive()) {
+      this.recordEvent('river-bug-control-negated', {
+        reason,
+        dashCount: this.riverBugState.dashCount
+      })
       return
     }
 
@@ -2343,8 +3447,25 @@ export default class PlayScene extends Scene {
       return false
     }
 
+    if (this.isEnemyUntargetable(target)) {
+      this.recordEvent('damage-blocked', {
+        attackType,
+        enemyId: target.id,
+        reason: 'huaner-untargetable'
+      })
+      return false
+    }
+
     const damageMultiplier = this.getDreamCatbugDamageMultiplier(target)
-    const normalizedDamage = roundToTenth(totalDamage * damageMultiplier)
+    let normalizedDamage = roundToTenth(totalDamage * damageMultiplier)
+    if (this.isHuanerEnemy(target) && target.huanerShieldCharges > 0 && target.huanerShieldReduction > 0) {
+      target.huanerShieldCharges -= 1
+      normalizedDamage = roundToTenth(normalizedDamage * (1 - target.huanerShieldReduction))
+    }
+    const enemyDamageReduction = this.getEnemyDamageReduction(target)
+    if (enemyDamageReduction > 0) {
+      normalizedDamage = roundToTenth(normalizedDamage * (1 - enemyDamageReduction))
+    }
     target.life = roundToTenth(Math.max(0, target.life - normalizedDamage))
     lastDamageDealt = normalizedDamage
     this.refreshEnemyUi()
@@ -3071,6 +4192,11 @@ export default class PlayScene extends Scene {
         return
       }
 
+      if (target && this.handleHuanerAI(enemyState, target)) {
+        enemyState.nextDecisionAt = now + 120
+        return
+      }
+
       if (absDeltaX > 200) {
         this.doAnim(enemySprite, 'walk2')
         if (deltaX > 0) {
@@ -3200,6 +4326,10 @@ export default class PlayScene extends Scene {
       return
     }
 
+    if (this.isRiverBugPlayer()) {
+      this.executeRiverBugKickSkill()
+    }
+
     if (this.isHpmPlayer()) {
       this.executeHpmKick()
       window.setTimeout(() => {
@@ -3322,6 +4452,10 @@ export default class PlayScene extends Scene {
       return
     }
 
+    if (this.isRiverBugPlayer()) {
+      this.executeRiverBugPunchSkill()
+    }
+
     if (this.isHpmPlayer()) {
       this.executeHpmPunch()
       window.setTimeout(() => {
@@ -3369,7 +4503,9 @@ export default class PlayScene extends Scene {
 
   setEnemyPunchTimeout(enemyState, target) {
     enemyState.hitPlayer = false
-    this.setEnemyScoreCalcTimeout(enemyState, target, [70, 110, 150, 200, 245, 290, 330], enemyState.stats.punchDamage, 113, 90)
+    const punchDamage = roundToTenth(enemyState.stats.punchDamage + Number(enemyState.huanerEnhancedPunchBonus || 0))
+    this.setEnemyScoreCalcTimeout(enemyState, target, [70, 110, 150, 200, 245, 290, 330], punchDamage, 113, 90)
+    enemyState.huanerEnhancedPunchBonus = 0
     window.setTimeout(() => {
       this.handleEnemyAttackRecovery(enemyState, 'punch')
       enemyState.justDown = false
@@ -3534,6 +4670,10 @@ export default class PlayScene extends Scene {
 
     playerProjectiles.getChildren().forEach((projectile) => {
       if (!projectile?.active) {
+        return
+      }
+
+      if (projectile.riverBugId) {
         return
       }
 
@@ -3847,6 +4987,16 @@ export default class PlayScene extends Scene {
       return
     }
 
+    if (this.isHuanerEnemy(target) && target.huanerMirrorState?.active) {
+      this.interruptHuanerUltimate(target, 'defeated')
+    }
+    if (this.isHuanerIllusion(target)) {
+      const bodyEnemy = this.enemies.find((enemy) => enemy.id === target.huanerOwnerId)
+      if (bodyEnemy?.huanerMirrorState?.active) {
+        this.interruptHuanerUltimate(bodyEnemy, 'illusion-defeated')
+      }
+    }
+
     target.defeatHandled = true
     this.triggerPlayerMasteryKillBurst()
     target.sprite.anims.play('die2', true)
@@ -4030,6 +5180,9 @@ export default class PlayScene extends Scene {
             this.triggerRetaliatoryQuakeAroundEnemy(enemyState, 'damage-taken')
             this.maybeTriggerRetaliatoryStun(enemyState)
             this.registerJumpRetaliationBoost(enemyState)
+          }
+          if (reducedDamage > 0) {
+            this.applyHuanerHitEffects(enemyState, target, attackType)
           }
         }
       }, ms)

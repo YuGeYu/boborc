@@ -54,6 +54,12 @@ export default class BootScene extends Scene {
     if (battleConfig.player?.mastery?.iconUrl) {
       this.load.image('playerMasteryIcon', battleConfig.player.mastery.iconUrl)
     }
+    if (battleConfig.player?.abilities?.riverBug?.bugTextureKey && battleConfig.player?.abilities?.riverBug?.bugAsset) {
+      this.load.image(
+        battleConfig.player.abilities.riverBug.bugTextureKey,
+        battleConfig.player.abilities.riverBug.bugAsset
+      )
+    }
     projectileAssets.forEach(({ textureKey, asset }) => {
       this.load.image(textureKey, asset)
     })

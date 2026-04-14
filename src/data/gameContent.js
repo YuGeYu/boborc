@@ -6,6 +6,8 @@ import garlicAvatar from '../../ads/garlic.jpg'
 import wudiXiaokeaiAvatar from '../../ads/wudi-xiaokeai.jpg'
 import iq45Avatar from '../../ads/b_b9e7427c2e9f147ff57c19d9147bb4a4.jpg'
 import hpmAvatar from '../../ads/hpm.jpg'
+import riverBugAvatar from '../../ads/hebian-xiaochong-avatar.jpg'
+import huanerAvatar from '../../ads/huaner.jpg'
 import gabengAvatar from '@/game/assets/gabeng-face.jpg'
 import yuzijiangAvatar from '@/game/assets/yuzijiang.jpg'
 import yuxingheAvatar from '../../ads/yuxinghe.jpg'
@@ -18,12 +20,15 @@ import starterRiversideSkinPreview from '@/game/assets/skins/starter-riverside-p
 import starterMuqiaoSkinSprite from '@/game/assets/chatgpt-usable-spritesheet.png'
 import qingningSkinPreview from '@/game/assets/skins/qingning-skin-preview.png'
 import qingningSkinSprite from '@/game/assets/skins/qingning-spritesheet-compatible.png'
+import riverBugSprite from '@/game/assets/river-bug.png'
 
 export const CURRENCY_LABEL = '朱玥'
 export const ACTIVITY_CURRENCY_LABEL = '星辉徽记'
 export const SUPER_CABBO_UNLOCK_LEVEL = 10
 export const GABENG_SPLIT_LEVEL_ID = 100
-export const FINAL_LEVEL_ID = 200
+export const FINAL_LEVEL_ID = 299
+export const HUANER_START_LEVEL_ID = 200
+export const HUANER_END_LEVEL_ID = 299
 export const ATTACK_COOLDOWNS = {
   punchMs: 390,
   kickMs: 450
@@ -1013,6 +1018,87 @@ export const PLAYER_CHARACTERS = [
     }
   },
   {
+    id: 'river-bug',
+    name: '河边的小虫',
+    title: '虫潮连锁型',
+    avatar: riverBugAvatar,
+    unlockCost: 1900,
+    passive: '第三次拳击会准备一次强化拳；小虫之间触碰会繁殖并引发范围伤害；河边的小虫触碰小虫会回血并再次获得强化拳。',
+    skills: [
+      'J 虫行拳击：沿用基础拳击动作与判定，同时向面朝方向放出一只沿地爬行的小虫；小虫碰到非己方会造成伤害但不会消失，抵达最远距离后会爆炸造成范围伤害。',
+      'K 虫巢飞踢：沿用基础飞踢动作与判定，同时在原地生成一只小虫并立刻造成范围伤害；1.5 秒后小虫会朝河边的小虫的方向爬行固定距离，期间命中非己方会造成伤害与减速，抵达终点后消失。',
+      'L 虫潮冲刺：按下 L 后 1 秒内再按 A 或 D 可发起长距离冲刺；冲刺碰到小虫会再获得一次 1 秒内可用的冲刺机会。第 3 次后冲刺附带霸体，第 6 次后冲刺期间额外进入无法命中，第 9 次后 40 秒内无法继续冲刺。'
+    ],
+    abilities: {
+      mode: 'river-bug-swarm',
+      ultimateCooldownMs: 40000,
+      riverBug: {
+        bugTextureKey: 'river-bug-sprite',
+        bugAsset: riverBugSprite,
+        passiveThirdPunchCount: 3,
+        enhancedPunchBaseDamage: 25,
+        enhancedPunchPunchRatio: 0.5,
+        enhancedPunchRange: 248,
+        enhancedPunchVerticalRange: 138,
+        bugFusionBaseDamage: 12,
+        bugFusionPunchRatio: 0.25,
+        bugFusionRange: 138,
+        bugFusionVerticalRange: 126,
+        bugPickupHealBase: 10,
+        bugPickupKickRatio: 0.22,
+        punchBugHitBaseDamage: 20,
+        punchBugHitPunchRatio: 0.4,
+        punchBugExplosionBaseDamage: 20,
+        punchBugExplosionPunchRatio: 0.4,
+        punchBugSpeed: 165,
+        punchBugMaxTravelDistance: 260,
+        punchBugExplosionRange: 132,
+        punchBugExplosionVerticalRange: 126,
+        punchBugOffsetX: 42,
+        punchBugOffsetY: 18,
+        kickBugSpawnBaseDamage: 15,
+        kickBugSpawnKickRatio: 0.2,
+        kickBugSpawnRange: 120,
+        kickBugSpawnVerticalRange: 110,
+        kickBugDelayMs: 1500,
+        kickBugTravelSpeed: 150,
+        kickBugTravelDistance: 210,
+        kickBugHitBaseDamage: 30,
+        kickBugHitKickRatio: 0.4,
+        kickBugSlowRatio: 0.25,
+        kickBugSlowDurationMs: 1800,
+        kickBugOffsetY: 18,
+        dashWindowMs: 1000,
+        dashDistance: 270,
+        dashDurationMs: 240,
+        dashHitBaseDamage: 23,
+        dashHitPunchRatio: 0.35,
+        dashExhaustedDurationMs: 40000,
+        dashBodyThreshold: 3,
+        dashUntargetableThreshold: 6,
+        dashMaxCount: 9,
+        chainBugTouchRadius: 28,
+        chainPlayerTouchRadius: 28
+      }
+    },
+    details: {
+      moveSpeed: '中高速度',
+      punchMechanic: 'J 沿用基础拳击动作与判定，并额外放出 1 只向前爬行的小虫。小虫命中非己方造成 20 + 当前拳击基础伤害 x 40% 的伤害但不会消失；爬到最远距离后爆开，对范围内非己方造成同值伤害。每第 3 次拳击会准备 1 次强化拳，下一次拳击额外对前方路径上的非己方造成 25 + 当前拳击基础伤害 x 50% 的伤害。',
+      kickMechanic: 'K 沿用基础飞踢动作与判定，并在自己脚下放出 1 只小虫。生成瞬间对周围非己方造成 15 + 当前飞踢基础伤害 x 20% 的伤害；1.5 秒后小虫会朝角色方向爬行固定距离，路上命中非己方时造成 30 + 当前飞踢基础伤害 x 40% 的伤害并施加 25% 减速，抵达终点后消失。',
+      ultimateMechanic: 'L 冷却 40 秒。按下 L 后进入 1 秒冲刺准备，期间再按 A 或 D 可向对应方向发起一次长距离冲刺；冲刺碰到非己方会造成 23 + 当前拳击基础伤害 x 35% 的伤害，碰到小虫则会再获得 1 次 1 秒内可用的续冲机会。累计完成 3 次冲刺后获得霸体，累计完成 6 次后冲刺期间额外无法命中；累计完成 9 次后进入 40 秒疲劳，期间无法继续冲刺。',
+      passiveDetail: '小虫与小虫相互触碰时会额外繁殖出新的小虫，并对附近非己方造成 12 + 当前拳击基础伤害 x 25% 的范围伤害。河边的小虫自身触碰小虫时会回复 10 + 当前飞踢基础伤害 x 22% 的生命，并立刻获得 1 次强化拳。',
+      remarks: '围绕虫体布置、强化拳爆发和连锁冲刺展开，操作上更偏重节奏、路径和资源回收。',
+      story: '河边的小虫从来不是靠正面硬碰硬打出名气的。它真正可怕的地方，是把每一只放出去的小虫都变成下一次爆发的踏板：碰撞会繁殖、靠近会回收、回收又会继续强化出拳，直到整条战线都被虫潮铺满。'
+    },
+    stats: {
+      health: 750,
+      moveSpeed: 180,
+      jumpVelocity: 550,
+      punchDamage: 70,
+      kickDamage: 80
+    }
+  },
+  {
     id: 'cabbo',
     name: '鸽吻',
     title: '终章奖励型',
@@ -1143,6 +1229,44 @@ const GABENG_BOSS_ABILITIES = {
   }
 }
 
+const HUANER_ABILITIES = {
+  mode: 'huaner',
+  huaner: {
+    markDurationMs: 6000,
+    shatterDamageBase: 5,
+    shatterPunchRatio: 0.03,
+    punchSkillCooldownMs: 10000,
+    punchSkillDamageBase: 19,
+    punchSkillPunchRatio: 0.65,
+    punchSkillSlowRatio: 0.15,
+    punchSkillSlowDurationMs: 1500,
+    enhancedPunchDamageBase: 4,
+    enhancedPunchPunchRatio: 0.15,
+    superArmorPerMarkMs: 250,
+    superArmorMaxMs: 2000,
+    kickSkillCooldownMs: 9000,
+    kickSkillDamageBase: 18,
+    kickSkillKickRatio: 0.55,
+    kickSkillSpeedRatio: 0.5,
+    kickSkillSpeedDurationMs: 1000,
+    kickSkillHealBase: 14,
+    kickSkillHealKickRatio: 0.02,
+    kickSkillUntargetableMs: 1500,
+    kickShieldReduction: 0.3,
+    ultimateCooldownMs: 40000,
+    ultimateDurationMs: 40000,
+    illusionLifeRatio: 0.1,
+    illusionDamageReduction: 0.2,
+    selfDamageReduction: 0.1,
+    mirrorRootDurationMs: 1000,
+    mirrorTickIntervalMs: 900,
+    mirrorHitDamageBase: 3,
+    mirrorHitPunchRatio: 0.02,
+    mirrorExplosionDamageBase: 30,
+    mirrorExplosionPunchRatio: 0.2
+  }
+}
+
 function getLevelReward(id) {
   return Math.max(1, Math.floor(id * 0.8))
 }
@@ -1199,6 +1323,29 @@ function createGeneratedLevel(id) {
   const depth = id - GENERATED_LEVEL_BASE_ID
   const { health, punchDamage, kickDamage, reactionMultiplier } = getGeneratedEnemyScale(id)
   const reward = getLevelReward(id)
+
+  if (id >= HUANER_START_LEVEL_ID) {
+    const huanerDepth = id - HUANER_START_LEVEL_ID
+    const descriptions = [
+      '幻二接管了后续试炼，数值成长沿用前面关卡的节奏，但会开始用印记、碎裂和幻像空间不断拉扯你。',
+      '进入幻二区间后，贴身硬换会越来越亏；一旦让本体和幻像轮流命中，就会频繁触发碎裂刷新技能。',
+      '越往后走，幻像空间越像是高压节奏检测。处理不好位移和打断，就会被连续拉扯到失误。'
+    ]
+    const descriptionIndex = Math.min(descriptions.length - 1, Math.floor(huanerDepth / 34))
+
+    return {
+      id,
+      name: `第 ${id} 关`,
+      reward,
+      description: descriptions[descriptionIndex],
+      enemyName: '幻二',
+      enemyTitle: id >= 260 ? '镜裂终段试炼者' : '双印碎裂操控者',
+      enemyAvatar: huanerAvatar,
+      enemyAbilities: HUANER_ABILITIES,
+      enemyScale: { health, punchDamage, kickDamage, reactionMultiplier },
+      battleMode: 'single'
+    }
+  }
 
   if (id === GABENG_SPLIT_LEVEL_ID) {
     return {

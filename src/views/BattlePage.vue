@@ -43,7 +43,9 @@
             <p v-if="isFinalBossLevel">第 100 关拥有分裂阶段，第一阶段击破后会变成两只嘎嘣。</p>
             <p v-if="isGabengLevel">嘎嘣机制：默认每秒锁定最近目标，并有概率发射箭矢；拳击命中会提高箭矢概率，飞踢空掉会降低箭矢概率。</p>
             <p v-if="isGabengLevel">箭矢会造成相当于嘎嘣当前拳击伤害 10% 的伤害，并附带较短眩晕；飞踢命中时也会附带较短击退控制。</p>
-            <p v-else>敌人会根据距离和时机自动选择拳击或飞踢。</p>
+            <p v-if="isHuanerLevel">幻二机制：本体与幻像会分别叠加双印记，双印记齐全时触发碎裂并刷新飞踢与 L 技能。</p>
+            <p v-if="isHuanerLevel">J 会突进并强化下一拳，K 会范围命中后回血、加速并短暂不可命中，L 会展开可被打断的镜像空间。</p>
+            <p v-if="!isGabengLevel && !isHuanerLevel">敌人会根据距离和时机自动选择拳击或飞踢。</p>
           </div>
 
           <div class="info-card">
@@ -186,6 +188,9 @@ export default {
     ))
     const isGabengLevel = computed(() => (
       state.battleConfig.value?.enemy?.name === '嘎嘣'
+    ))
+    const isHuanerLevel = computed(() => (
+      state.battleConfig.value?.enemy?.name === '幻二'
     ))
 
     const enhancedBattleConfig = computed(() => state.battleConfig.value)
@@ -942,6 +947,7 @@ export default {
       displayBattleResult,
       isFinalBossLevel,
       isGabengLevel,
+      isHuanerLevel,
       latestDebugLog,
       latestLogPage,
       latestLogPageCount,
